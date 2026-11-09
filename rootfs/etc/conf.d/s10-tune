@@ -1,0 +1,6 @@
+# Settings for /etc/local.d/s10-tune.start
+# Hardware watchdog: leave 0 until you have tested it by hand:
+#   doas watchdog -t 10 -T 60 /dev/watchdog ; doas killall -9 watchdog   -> reboot ~60 s later
+# Then set it to 1. (If the watchdog misbehaves with 1, the phone reboots every minute.)
+ENABLE_WATCHDOG=0
+#CHARGE_CAP=80

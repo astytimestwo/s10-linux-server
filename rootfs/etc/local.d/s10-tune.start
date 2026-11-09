@@ -1,0 +1,39 @@
+#!/bin/sh
+# OpenRC local.d boot script for the S10 server.
+# Install:  doas cp s10-tune.start /etc/local.d/ && doas chmod +x /etc/local.d/s10-tune.start
+#           doas rc-update add local default
+# Settings live in /etc/conf.d/s10-tune (optional), defaults below.
+
+CHARGE_CAP=80          # % — Samsung battery_v2: stop charging at N, resume at N-2
+BLANK_SCREEN=1
+WIFI_POWERSAVE_OFF=1
+ENABLE_WATCHDOG=0      # set to 1 only after /dev/watchdog was tested by hand
+[ -r /etc/conf.d/s10-tune ] && . /etc/conf.d/s10-tune
+
+log() { echo "s10-tune: $*" | tee /dev/kmsg >/dev/null 2>&1 || true; }
+
+# 1. Battery charge cap (resets to 0 = no cap on every boot)
+B=/sys/class/power_supply/battery/batt_full_capacity
+if [ -w "$B" ]; then
+	echo "$CHARGE_CAP" > "$B" && log "charge cap set to $(cat "$B")%"
+else
+	log "WARNING: $B not found — battery will charge to 100%"
+fi
+
+# 2. Screen off (headless; avoids AMOLED burn-in and heat)
+if [ "$BLANK_SCREEN" = 1 ]; then
+	for fb in /sys/class/graphics/fb*/blank; do [ -w "$fb" ] && echo 1 > "$fb"; done
+	for bl in /sys/class/backlight/*/brightness; do [ -w "$bl" ] && echo 0 > "$bl"; done
+	log "screen blanked"
+fi
+
+# 3. Wi-Fi power save off (audio dropouts / latency)
+if [ "$WIFI_POWERSAVE_OFF" = 1 ] && command -v iw >/dev/null; then
+	( sleep 60; iw dev wlan0 set power_save off 2>/dev/null && log "wlan0 power_save off" ) >/dev/null 2>&1 &
+fi
+
+# 4. Hardware watchdog (kernel pets it until userspace opens /dev/watchdog;
+#    once this daemon runs, a hang -> reboot after ~60 s)
+if [ "$ENABLE_WATCHDOG" = 1 ] && [ -c /dev/watchdog ]; then
+	watchdog -t 10 -T 60 /dev/watchdog && log "watchdog daemon started"
+fi

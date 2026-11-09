@@ -1,0 +1,12 @@
+# Configuration for /etc/init.d/aria2 (Alpine aria2-daemon). Run as "user" so downloads
+# are owned by you; files land in /srv/files/downloads.
+command_user="user"
+cfgfile="/etc/aria2.conf"
+logfile="/var/log/aria2.log"
+# /srv/files only exists when the /srv drive is mounted (never fill the root fs)
+required_dirs="/srv/files"
+# At boot aria2 can start before Wi-Fi has an address and exit ("failed to bind TCP port 6800").
+# supervise-daemon restarts it every 15 s until it stays up (and after any crash).
+supervisor="supervise-daemon"
+respawn_delay=15
+respawn_max=0

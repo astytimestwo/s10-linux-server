@@ -1,0 +1,20 @@
+#!/bin/sh
+# One-line S10 health summary: s10-status        -> "CPU 38° GPU 35° BAT 31° 85% ↓ | load 1.2 | /srv 1% | up 2h"
+#                              s10-status -t     -> short form for the tmux status bar
+zone() { for z in /sys/class/thermal/thermal_zone*; do [ "$(cat $z/type 2>/dev/null)" = "$1" ] && { echo $(( $(cat $z/temp) / 1000 )); return; }; done; }
+cpu=$(for t in BIG MID LITTLE; do zone $t; done | sort -n | tail -1)
+gpu=$(zone G3D)
+B=/sys/class/power_supply/battery
+bat=$(( $(cat $B/temp 2>/dev/null || echo 0) / 10 ))
+pct=$(cat $B/capacity 2>/dev/null)
+case "$(cat $B/status 2>/dev/null)" in
+	Charging) st="+" ;; Discharging) st="-" ;; Full|Not\ charging) st="=" ;; *) st="?" ;;
+esac
+if [ "$1" = "-t" ]; then
+	echo "CPU ${cpu}° BAT ${bat}° ${pct}%${st}"
+	exit 0
+fi
+load=$(cut -d' ' -f1 /proc/loadavg)
+srv=""; mountpoint -q /srv && srv=$(df -P /srv 2>/dev/null | awk 'NR==2{print $5}')
+up=$(awk '{s=int($1); d=int(s/86400); h=int(s%86400/3600); m=int(s%3600/60); if(d) printf "%dd %dh", d, h; else if(h) printf "%dh %dm", h, m; else printf "%dm", m}' /proc/uptime)
+echo "CPU ${cpu}°C  GPU ${gpu}°C  battery ${bat}°C ${pct}% (${st})  |  load ${load} (~11 is normal idle)  |  /srv ${srv:-not mounted}  |  up ${up}"

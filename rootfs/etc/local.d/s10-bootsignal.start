@@ -1,0 +1,25 @@
+#!/bin/sh
+# /etc/local.d/s10-bootsignal.start: tell the user how boot went without a screen.
+#   1 buzz            Linux has booted (services started)
+#   2 buzzes + flash  online: the home router answers
+#   3 long buzzes     still no network after 5 minutes (see docs/setup.md, "Get a network connection without a screen")
+# Runs in the background so it never delays boot. Log: /var/log/s10-bootsignal.log
+# (logger alone isn't enough: syslog messages don't end up in logbookd on this image)
+log() { echo "$(date '+%F %T') $*" >> /var/log/s10-bootsignal.log; logger -t s10-bootsignal "$*"; }
+(
+	log "booted (uptime $(cut -d. -f1 /proc/uptime)s)"
+	/usr/local/sbin/s10-signal buzz 1 400
+	t=0
+	while [ $t -lt 300 ]; do
+		gw=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
+		if [ -n "$gw" ] && ping -c 1 -W 2 "$gw" >/dev/null 2>&1; then
+			log "online after ${t}s (gateway $gw)"
+			/usr/local/sbin/s10-signal buzz 2 250
+			/usr/local/sbin/s10-signal flash 1
+			exit 0
+		fi
+		sleep 5; t=$((t + 5))
+	done
+	log "NO network 5 min after boot"
+	/usr/local/sbin/s10-signal buzz 3 900
+) >/dev/null 2>&1 &

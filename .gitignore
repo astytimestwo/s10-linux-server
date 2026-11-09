@@ -1,0 +1,17 @@
+# Never commit images, backups or secrets
+*.img
+*.tar
+*.zip
+*.apk
+partition-backup/
+*.nmconnection
+!*.nmconnection.example
+*secret*
+*password*
+.env
+.env.*
+*.pem
+*.key
+id_*
+*.log
+*.pcap

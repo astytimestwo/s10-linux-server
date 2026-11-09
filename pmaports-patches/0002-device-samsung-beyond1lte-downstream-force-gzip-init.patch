@@ -1,0 +1,46 @@
+From 674a7e6b65e3ccd901dd7ef1b3a08f8f1a09e0fd Mon Sep 17 00:00:00 2001
+From: Augustya Baghel <261733204+astytimestwo@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 17:56:10 +0000
+Subject: [PATCH 2/4] device-samsung-beyond1lte-downstream: force gzip
+ initramfs (kernel lacks RD_ZSTD)
+
+---
+ .../archived/device-samsung-beyond1lte-downstream/APKBUILD   | 4 ++--
+ .../archived/device-samsung-beyond1lte-downstream/deviceinfo | 5 +++++
+ 2 files changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/device/archived/device-samsung-beyond1lte-downstream/APKBUILD b/device/archived/device-samsung-beyond1lte-downstream/APKBUILD
+index 29263d8f29..5bfabfb996 100644
+--- a/device/archived/device-samsung-beyond1lte-downstream/APKBUILD
++++ b/device/archived/device-samsung-beyond1lte-downstream/APKBUILD
+@@ -4,7 +4,7 @@ maintainer="chiffa <chiffathefoxx@gmail.com>"
+ pkgname=device-samsung-beyond1lte-downstream
+ pkgdesc="Samsung Galaxy S10 (Downstream)"
+ pkgver=7
+-pkgrel=0
++pkgrel=1
+ url="https://postmarketos.org"
+ license="MIT"
+ arch="aarch64"
+@@ -28,7 +28,7 @@ package() {
+ }
+ 
+ sha512sums="
+-18b63a1b7056738ab1f6178f6258f4d90bca6bc79ce7610e3bcb95b38c12c0b0a87dc8302578d63f2bd28ab2c92e8e93608e6e54095fdbdd47c3cdd0c0f85293  deviceinfo
++512c7b946a0b103102e1160653304a3772da0c63671cdf635371b9f9423b99ae5df267cfdb4f16fed0f02b6e4a64360f5d386965e323fe1d081db24259c811a5  deviceinfo
+ cb0731b5e71b427024bb47cd70aa48d3be409a89aa476f3fd4dea8e5b42ef87371a65bbe836bca7da04c0384178ad293b44da8a88557ad04fc57857bef502050  kernel-cmdline.conf
+ 03deb65563f4b4421491643854927e88b2d5880b8b19ee6baa4d3fa1ec3f7d7a1c2977fd2c3c41270254efea6fa0c5fdae0a382e7c427d5a3bf6fad34c25375e  initfs-hook.sh
+ "
+diff --git a/device/archived/device-samsung-beyond1lte-downstream/deviceinfo b/device/archived/device-samsung-beyond1lte-downstream/deviceinfo
+index 2d2fdb088a..a106ac914b 100644
+--- a/device/archived/device-samsung-beyond1lte-downstream/deviceinfo
++++ b/device/archived/device-samsung-beyond1lte-downstream/deviceinfo
+@@ -33,3 +33,8 @@ deviceinfo_no_framebuffer="true"
+ deviceinfo_rootfs_image_sector_size="4096"
+ deviceinfo_bootimg_append_seandroidenforce="true"
+ deviceinfo_create_initfs_extra="true"
++
++# Kernel only has CONFIG_RD_GZIP / CONFIG_RD_LZ4 (no RD_ZSTD); mkinitfs defaults to zstd
++# -> "junk in compressed archive" -> panic "Unable to mount root fs". Force gzip.
++deviceinfo_initfs_compression="gzip"
++deviceinfo_initfs_extra_compression="gzip"

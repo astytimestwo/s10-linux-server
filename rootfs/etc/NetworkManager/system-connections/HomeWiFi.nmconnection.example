@@ -1,0 +1,24 @@
+# Example Wi-Fi profile. Copy to /etc/NetworkManager/system-connections/HomeWiFi.nmconnection,
+# fill in SSID + password, then: chmod 600 the file (NM ignores world-readable profiles).
+# Handy when you have to add Wi-Fi from TWRP before the first boot (no screen, no USB network).
+[connection]
+id=HomeWiFi
+type=wifi
+interface-name=wlan0
+autoconnect=true
+# 0 = retry forever (if the router is down at boot, keep trying instead of giving up)
+autoconnect-retries=0
+
+[wifi]
+mode=infrastructure
+ssid=YOUR_SSID
+
+[wifi-security]
+key-mgmt=wpa-psk
+psk=YOUR_WIFI_PASSWORD
+
+[ipv4]
+method=auto
+
+[ipv6]
+method=auto

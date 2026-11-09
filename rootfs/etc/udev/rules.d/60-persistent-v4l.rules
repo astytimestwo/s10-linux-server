@@ -1,0 +1,6 @@
+# Empty override of the stock rule (keep this comment, the file just has to exist).
+# On this kernel udev's v4l_id probes the MFC video codec, which requests the missing
+# firmware mfc_fw.bin. Each request times out after 60 s and "udev settle" waits for
+# all three, so NetworkManager only started ~3 minutes after power-on.
+# With this file SSH is reachable ~35-45 s after boot. Costs: no v4l device symlinks
+# (camera/codec are unused on a headless server).

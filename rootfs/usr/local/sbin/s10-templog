@@ -1,0 +1,45 @@
+#!/bin/sh
+# S10 temperature logger. Run by cron every 5 minutes (see /etc/crontabs/root).
+# Appends one CSV line to /var/log/s10-temps.csv; writes to /var/log/s10-temp-alerts.log
+# (and syslog) when something runs hot.
+# Install: install -m 755 s10-templog /usr/local/sbin/
+LOG=/var/log/s10-temps.csv
+ALERT=/var/log/s10-temp-alerts.log
+BATT_WARN=40   # °C, battery
+CPU_WARN=70    # °C, hottest CPU cluster (BIG/MID throttle at 60 °C, hard limit 83+)
+
+zone() {   # temperature of the thermal zone with this type, in whole °C ("" if missing)
+	for z in /sys/class/thermal/thermal_zone*; do
+		[ "$(cat $z/type 2>/dev/null)" = "$1" ] && { echo $(( $(cat $z/temp) / 1000 )); return; }
+	done
+}
+ps_read() { cat /sys/class/power_supply/$1 2>/dev/null; }
+
+big=$(zone BIG); mid=$(zone MID); little=$(zone LITTLE); gpu=$(zone G3D)
+a=$(ps_read ac/temp); chg=$(( ${a:-0} / 10 ))         # charger chip, tenths of °C
+bat10=$(ps_read battery/temp); bat=$(( ${bat10:-0} / 10 ))
+cap=$(ps_read battery/capacity); st=$(ps_read battery/status | tr ' ' '_')
+cur=$(ps_read battery/current_now)                    # mA, negative = draining
+load=$(cut -d' ' -f1 /proc/loadavg)
+throttled=0
+for c in /sys/class/thermal/cooling_device*/cur_state; do v=$(cat $c 2>/dev/null); [ -n "$v" ] && [ "$v" != 0 ] && throttled=1; done
+
+[ -s $LOG ] || echo "time,big,mid,little,gpu,charger,battery,battery_pct,status,current_ma,load1,throttled" > $LOG
+echo "$(date '+%F %T'),$big,$mid,$little,$gpu,$chg,${bat10%?}.${bat10#${bat10%?}},$cap,$st,$cur,$load,$throttled" >> $LOG
+
+hot=""
+[ "$bat" -ge $BATT_WARN ] && hot="$hot battery ${bat}C"
+for v in "$big" "$mid" "$little"; do [ -n "$v" ] && [ "$v" -ge $CPU_WARN ] && { hot="$hot cpu ${v}C"; break; }; done
+[ "$throttled" = 1 ] && hot="$hot throttling"
+if [ -n "$hot" ]; then
+	echo "$(date '+%F %T') HOT:$hot (big $big mid $mid little $little gpu $gpu bat $bat chg $chg)" >> $ALERT
+	logger -t s10-templog "HOT:$hot"
+fi
+
+# keep the alert log small too
+[ -f $ALERT ] && [ $(wc -c < $ALERT) -gt 200000 ] && tail -n 1000 $ALERT > $ALERT.tmp && mv $ALERT.tmp $ALERT
+
+# keep the CSV under ~2 MB (about 2 months at 5-minute intervals)
+if [ $(wc -c < $LOG) -gt 2000000 ]; then
+	{ head -1 $LOG; tail -n 15000 $LOG; } > $LOG.tmp && mv $LOG.tmp $LOG
+fi

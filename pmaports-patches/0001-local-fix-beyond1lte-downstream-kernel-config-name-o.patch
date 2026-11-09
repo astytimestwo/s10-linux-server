@@ -1,0 +1,68 @@
+From 1a12577cd7d99a4a21804b026b45ecadc6e4dfbb Mon Sep 17 00:00:00 2001
+From: Augustya Baghel <261733204+astytimestwo@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 11:02:58 +0000
+Subject: [PATCH 1/4] local: fix beyond1lte-downstream kernel config name;
+ os_patch_level 2023-03
+
+Workaround for inverted test in devicepkg-dev downstreamkernel_prepare.sh (MR !9347).
+Not for upstream as-is.
+---
+ device/archived/device-samsung-beyond1lte-downstream/APKBUILD | 2 +-
+ .../archived/device-samsung-beyond1lte-downstream/deviceinfo  | 2 +-
+ device/archived/linux-samsung-beyond1lte-downstream/APKBUILD  | 4 ++--
+ ...e.aarch64 => config-samsung-beyond1lte-downstream.aarch64} | 0
+ 4 files changed, 4 insertions(+), 4 deletions(-)
+ rename device/archived/linux-samsung-beyond1lte-downstream/{config-samsung-beyond1lte.aarch64 => config-samsung-beyond1lte-downstream.aarch64} (100%)
+
+diff --git a/device/archived/device-samsung-beyond1lte-downstream/APKBUILD b/device/archived/device-samsung-beyond1lte-downstream/APKBUILD
+index 735c541d8d..29263d8f29 100644
+--- a/device/archived/device-samsung-beyond1lte-downstream/APKBUILD
++++ b/device/archived/device-samsung-beyond1lte-downstream/APKBUILD
+@@ -28,7 +28,7 @@ package() {
+ }
+ 
+ sha512sums="
+-911429ffa6d21010ac5714072c4678967856417595a819566e3ad068cdfb2cac5c59343a32e1fca2a2f7b9ace6644b1d43ce1bba985b7bee286d47df46ed844a  deviceinfo
++18b63a1b7056738ab1f6178f6258f4d90bca6bc79ce7610e3bcb95b38c12c0b0a87dc8302578d63f2bd28ab2c92e8e93608e6e54095fdbdd47c3cdd0c0f85293  deviceinfo
+ cb0731b5e71b427024bb47cd70aa48d3be409a89aa476f3fd4dea8e5b42ef87371a65bbe836bca7da04c0384178ad293b44da8a88557ad04fc57857bef502050  kernel-cmdline.conf
+ 03deb65563f4b4421491643854927e88b2d5880b8b19ee6baa4d3fa1ec3f7d7a1c2977fd2c3c41270254efea6fa0c5fdae0a382e7c427d5a3bf6fad34c25375e  initfs-hook.sh
+ "
+diff --git a/device/archived/device-samsung-beyond1lte-downstream/deviceinfo b/device/archived/device-samsung-beyond1lte-downstream/deviceinfo
+index 96c3151354..2d2fdb088a 100644
+--- a/device/archived/device-samsung-beyond1lte-downstream/deviceinfo
++++ b/device/archived/device-samsung-beyond1lte-downstream/deviceinfo
+@@ -19,7 +19,7 @@ deviceinfo_screen_height="3040"
+ deviceinfo_flash_method="heimdall-bootimg"
+ deviceinfo_flash_sparse="true"
+ deviceinfo_generate_bootimg="true"
+-deviceinfo_bootimg_custom_args="--header_version 1 --os_version 12.0.0 --os_patch_level 2021-12"
++deviceinfo_bootimg_custom_args="--header_version 1 --os_version 12.0.0 --os_patch_level 2023-03"
+ deviceinfo_flash_offset_kernel="0x00008000"
+ deviceinfo_flash_offset_ramdisk="0x01000000"
+ deviceinfo_flash_offset_second="0xf0000000"
+diff --git a/device/archived/linux-samsung-beyond1lte-downstream/APKBUILD b/device/archived/linux-samsung-beyond1lte-downstream/APKBUILD
+index 347ccc32d1..69e78f6f4f 100644
+--- a/device/archived/linux-samsung-beyond1lte-downstream/APKBUILD
++++ b/device/archived/linux-samsung-beyond1lte-downstream/APKBUILD
+@@ -30,7 +30,7 @@ makedepends="
+ # Source
+ _repository="android_kernel_samsung_exynos9820"
+ _commit="7d08ec364a0659edcf90a8dae4453b21e4542311"
+-_config="config-$_flavor.$arch"
++_config="config-samsung-beyond1lte-downstream.$arch"
+ source="
+ 	$pkgname-$_commit.tar.gz::https://github.com/LineageOS/$_repository/archive/$_commit.tar.gz
+ 	$_config
+@@ -60,7 +60,7 @@ package() {
+ 
+ sha512sums="
+ 8ac222f644a534204fd5ea5e657991214bfc069042b48620b956ce0c249af6639b9a18c20892481c8514d2cdd3c3bd967062a4d16ba53504fd76d1227a365d44  linux-samsung-beyond1lte-downstream-7d08ec364a0659edcf90a8dae4453b21e4542311.tar.gz
+-a4a99dd42d0f687e5f0a46fc0f7dd61ffa5deb06459153befe109bed87cb282ab3d1454836865b78f7ac8e67225df98a79ff22aa52ce517e82c5ebd6c011f39f  config-samsung-beyond1lte.aarch64
++a4a99dd42d0f687e5f0a46fc0f7dd61ffa5deb06459153befe109bed87cb282ab3d1454836865b78f7ac8e67225df98a79ff22aa52ce517e82c5ebd6c011f39f  config-samsung-beyond1lte-downstream.aarch64
+ 1872a4d9963f128965ab46b329d448e6b776d373cf99f2b8e11d025aa3e10a0308da19beb715c6bdced0b2c6ef44c47a5c013554a19787a64f8ac58d34bc912f  remove-header-lkc.patch
+ 182be3c596b9cc267ac108d7cf03fc8c328ccc6b36770800e4dcedea8d1bb65e3f5eacf590c2948f58b1418cc60a1670ba77dde8c259e428d158c31b6e1dbaf5  fix-check-lxdialog.patch
+ 6ab9db01d35f7f5cc2c19ebe5f65a7dc479a1c68de587300cdde9a6c759d34610666c72f0f321cd450cf56c13df3b54a774e0f7ebdbf0f8608fbfd66b49d04e7  selinux_include_generated_headers.patch
+diff --git a/device/archived/linux-samsung-beyond1lte-downstream/config-samsung-beyond1lte.aarch64 b/device/archived/linux-samsung-beyond1lte-downstream/config-samsung-beyond1lte-downstream.aarch64
+similarity index 100%
+rename from device/archived/linux-samsung-beyond1lte-downstream/config-samsung-beyond1lte.aarch64
+rename to device/archived/linux-samsung-beyond1lte-downstream/config-samsung-beyond1lte-downstream.aarch64

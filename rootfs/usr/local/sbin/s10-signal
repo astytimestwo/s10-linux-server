@@ -1,0 +1,16 @@
+#!/bin/sh
+# s10-signal: feel/see the S10 when the screen is dead (needs root).
+#   s10-signal buzz [count] [ms]   vibrate count times (default 1 x 300 ms)
+#   s10-signal flash [count]       blink the rear flash LED
+VIB=/sys/class/timed_output/vibrator/enable
+LED=/sys/class/leds/torch-sec1/brightness
+what=$1; n=${2:-1}; ms=${3:-300}
+i=0
+while [ $i -lt "$n" ]; do
+	case "$what" in
+		buzz)  [ -w $VIB ] && echo "$ms" > $VIB; sleep 1 ;;
+		flash) [ -w $LED ] && { echo 3 > $LED; sleep 0.4; echo 0 > $LED; sleep 0.6; } ;;
+		*) echo "usage: s10-signal buzz|flash [count] [ms]"; exit 1 ;;
+	esac
+	i=$((i + 1))
+done

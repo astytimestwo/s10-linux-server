@@ -1,0 +1,67 @@
+From c4c1aa22034f455238b13456bf426573e23fb764 Mon Sep 17 00:00:00 2001
+From: Augustya Baghel <261733204+astytimestwo@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 18:16:50 +0000
+Subject: [PATCH 3/4] linux-samsung-beyond1lte-downstream: apply LOOP_CONFIGURE
+ block_size (fix subpartition scan)
+
+---
+ .../APKBUILD                                  |  4 +++-
+ .../loop-configure-apply-block-size.patch     | 22 +++++++++++++++++++
+ 2 files changed, 25 insertions(+), 1 deletion(-)
+ create mode 100644 device/archived/linux-samsung-beyond1lte-downstream/loop-configure-apply-block-size.patch
+
+diff --git a/device/archived/linux-samsung-beyond1lte-downstream/APKBUILD b/device/archived/linux-samsung-beyond1lte-downstream/APKBUILD
+index 69e78f6f4f..c26ddbb114 100644
+--- a/device/archived/linux-samsung-beyond1lte-downstream/APKBUILD
++++ b/device/archived/linux-samsung-beyond1lte-downstream/APKBUILD
+@@ -5,7 +5,7 @@
+ maintainer="chiffa <chiffathefoxx@gmail.com>"
+ pkgname=linux-samsung-beyond1lte-downstream
+ pkgver=4.14.316
+-pkgrel=0
++pkgrel=1
+ pkgdesc="Samsung Galaxy S10 downstream kernel fork"
+ arch="aarch64"
+ _carch="arm64"
+@@ -37,6 +37,7 @@ source="
+ 	remove-header-lkc.patch
+ 	fix-check-lxdialog.patch
+ 	selinux_include_generated_headers.patch
++	loop-configure-apply-block-size.patch
+ "
+ builddir="$srcdir/$_repository-$_commit"
+ _outdir="out"
+@@ -64,4 +65,5 @@ a4a99dd42d0f687e5f0a46fc0f7dd61ffa5deb06459153befe109bed87cb282ab3d1454836865b78
+ 1872a4d9963f128965ab46b329d448e6b776d373cf99f2b8e11d025aa3e10a0308da19beb715c6bdced0b2c6ef44c47a5c013554a19787a64f8ac58d34bc912f  remove-header-lkc.patch
+ 182be3c596b9cc267ac108d7cf03fc8c328ccc6b36770800e4dcedea8d1bb65e3f5eacf590c2948f58b1418cc60a1670ba77dde8c259e428d158c31b6e1dbaf5  fix-check-lxdialog.patch
+ 6ab9db01d35f7f5cc2c19ebe5f65a7dc479a1c68de587300cdde9a6c759d34610666c72f0f321cd450cf56c13df3b54a774e0f7ebdbf0f8608fbfd66b49d04e7  selinux_include_generated_headers.patch
++cff9427c3d9eb5088b11424decc93b44357cc7246842902c80dc75fa05ed7ee1f6f5e111b8c65c394fbcc08e7615bac729121b9f72b771d03846bbc2d3dfbf7f  loop-configure-apply-block-size.patch
+ "
+diff --git a/device/archived/linux-samsung-beyond1lte-downstream/loop-configure-apply-block-size.patch b/device/archived/linux-samsung-beyond1lte-downstream/loop-configure-apply-block-size.patch
+new file mode 100644
+index 0000000000..f1cb7eef35
+--- /dev/null
++++ b/device/archived/linux-samsung-beyond1lte-downstream/loop-configure-apply-block-size.patch
+@@ -0,0 +1,22 @@
++--- a/drivers/block/loop.c
+++++ b/drivers/block/loop.c
++@@ -1074,6 +1074,19 @@
++ 		blk_queue_io_min(lo->lo_queue, bsize);
++ 	}
++ 
+++	/*
+++	 * The Android LOOP_CONFIGURE backport validated config->block_size
+++	 * but never applied it to the queue (upstream 5.8+ does), so loop
+++	 * devices stayed at 512-byte sectors and partition scanning of
+++	 * 4096-byte-sector images (losetup -P --sector-size 4096) found
+++	 * nothing. Apply it before the dio update and partition scan.
+++	 */
+++	if (config->block_size) {
+++		blk_queue_logical_block_size(lo->lo_queue, config->block_size);
+++		blk_queue_physical_block_size(lo->lo_queue, config->block_size);
+++		blk_queue_io_min(lo->lo_queue, config->block_size);
+++	}
+++
++ 	loop_update_dio(lo);
++ 	loop_sysfs_init(lo);
++ 

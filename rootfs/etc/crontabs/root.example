@@ -1,0 +1,5 @@
+# Lines to ADD to /etc/crontabs/root (keep Alpine's run-parts lines). crond must be enabled:
+#   rc-update add crond default
+*/5	*	*	*	*	/usr/local/sbin/s10-templog
+*/2	*	*	*	*	/usr/local/sbin/s10-netwatch
+1	4	*	*	*	/usr/local/sbin/s10-netwatch retry5

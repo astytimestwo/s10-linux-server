@@ -1,0 +1,35 @@
+# S10 IPv4 firewall (iptables-legacy-restore format). Loaded all-or-nothing:
+# if any line is wrong, nothing is applied and the old rules stay.
+# Kernel has conntrack but NO multiport, so one rule per port.
+# !! Change 192.168.1.0/24 to YOUR home subnet, or SSH over Wi-Fi gets blocked
+# !! (USB and Tailscale stay open). Remove ports for services you don't run.
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -i lo -j ACCEPT
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+# USB networking from the PC and Tailscale: always allowed
+-A INPUT -i usb0 -j ACCEPT
+-A INPUT -i ncm0 -j ACCEPT
+-A INPUT -i rndis0 -j ACCEPT
+-A INPUT -i tailscale0 -j ACCEPT
+-A INPUT -p icmp -j ACCEPT
+# DHCP lease renewals from the router
+-A INPUT -p udp --sport 67 --dport 68 -j ACCEPT
+# Tailscale direct connections (from anywhere)
+-A INPUT -p udp --dport 41641 -j ACCEPT
+# Home LAN only:
+# SSH
+-A INPUT -s 192.168.1.0/24 -p tcp --dport 22 -j ACCEPT
+# AdGuard Home: DNS, web UI after setup (80), setup wizard (3000)
+-A INPUT -s 192.168.1.0/24 -p tcp --dport 53 -j ACCEPT
+-A INPUT -s 192.168.1.0/24 -p udp --dport 53 -j ACCEPT
+-A INPUT -s 192.168.1.0/24 -p tcp --dport 80 -j ACCEPT
+-A INPUT -s 192.168.1.0/24 -p tcp --dport 3000 -j ACCEPT
+# Samba (SMB2+, port 445 only; NetBIOS is off)
+-A INPUT -s 192.168.1.0/24 -p tcp --dport 445 -j ACCEPT
+# librespot / Spotify Connect discovery: mDNS + zeroconf server
+-A INPUT -s 192.168.1.0/24 -p udp --dport 5353 -j ACCEPT
+-A INPUT -s 192.168.1.0/24 -p tcp --dport 5354 -j ACCEPT
+COMMIT

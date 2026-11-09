@@ -1,0 +1,9 @@
+# tailscaled logs a lot; without this the log grows forever on a 24/7 box.
+/var/log/tailscaled.log {
+	size 5M
+	rotate 2
+	compress
+	copytruncate
+	missingok
+	notifempty
+}

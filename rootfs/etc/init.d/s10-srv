@@ -1,0 +1,42 @@
+#!/sbin/openrc-run
+# Check and mount the /srv data partition (old Android USERDATA, ext4 label "srv").
+# Install: install -m 755 s10-srv /etc/init.d/s10-srv && rc-update add s10-srv boot
+# fstab has it as "noauto,nofail", so only this service mounts it.
+# Headless-safe: a disk problem never stops the boot (SSH must always come up);
+# /srv just stays unmounted and the reason is logged.
+description="Check and mount /srv"
+
+depend() {
+	need root
+	after modules
+}
+
+start() {
+	dev=$(findfs LABEL=srv 2>/dev/null)
+	if [ -z "$dev" ]; then
+		eend 1 "/srv: no partition labelled srv, not mounting"
+		logger -t s10-srv "no partition labelled srv, /srv not mounted"
+		return 0
+	fi
+	mountpoint -q /srv && return 0
+	ebegin "Checking /srv ($dev)"
+	e2fsck -p "$dev" >/dev/kmsg 2>&1
+	rc=$?
+	if [ $rc -ge 4 ]; then
+		eend 1 "e2fsck exit $rc: /srv NOT mounted, needs a manual e2fsck"
+		logger -t s10-srv "e2fsck exit $rc on $dev, /srv not mounted"
+		return 0
+	fi
+	eend 0
+	ebegin "Mounting /srv"
+	mount /srv
+	eend $?
+	return 0
+}
+
+stop() {
+	mountpoint -q /srv || return 0
+	ebegin "Unmounting /srv"
+	umount /srv
+	eend $?
+}

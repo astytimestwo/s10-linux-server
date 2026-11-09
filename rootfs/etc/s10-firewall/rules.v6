@@ -1,0 +1,15 @@
+# S10 IPv6 firewall (ip6tables-legacy-restore format), all-or-nothing like rules.v4.
+*filter
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+-A INPUT -i lo -j ACCEPT
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+-A INPUT -i usb0 -j ACCEPT
+-A INPUT -i ncm0 -j ACCEPT
+-A INPUT -i rndis0 -j ACCEPT
+-A INPUT -i tailscale0 -j ACCEPT
+-A INPUT -p ipv6-icmp -j ACCEPT
+-A INPUT -p udp --dport 546 -j ACCEPT
+-A INPUT -p udp --dport 41641 -j ACCEPT
+COMMIT

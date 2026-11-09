@@ -1,0 +1,47 @@
+From 77007556911d9a0469e77d6c668b7ce93cd902ea Mon Sep 17 00:00:00 2001
+From: Augustya Baghel <261733204+astytimestwo@users.noreply.github.com>
+Date: Sat, 7 Nov 2026 18:30:34 +0000
+Subject: [PATCH 4/4] device-samsung-beyond1lte-downstream: use 1d6b:0104 USB
+ ID (Windows NCM)
+
+---
+ .../archived/device-samsung-beyond1lte-downstream/APKBUILD  | 4 ++--
+ .../device-samsung-beyond1lte-downstream/deviceinfo         | 6 ++++++
+ 2 files changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/device/archived/device-samsung-beyond1lte-downstream/APKBUILD b/device/archived/device-samsung-beyond1lte-downstream/APKBUILD
+index 5bfabfb996..7914f354eb 100644
+--- a/device/archived/device-samsung-beyond1lte-downstream/APKBUILD
++++ b/device/archived/device-samsung-beyond1lte-downstream/APKBUILD
+@@ -4,7 +4,7 @@ maintainer="chiffa <chiffathefoxx@gmail.com>"
+ pkgname=device-samsung-beyond1lte-downstream
+ pkgdesc="Samsung Galaxy S10 (Downstream)"
+ pkgver=7
+-pkgrel=1
++pkgrel=2
+ url="https://postmarketos.org"
+ license="MIT"
+ arch="aarch64"
+@@ -28,7 +28,7 @@ package() {
+ }
+ 
+ sha512sums="
+-512c7b946a0b103102e1160653304a3772da0c63671cdf635371b9f9423b99ae5df267cfdb4f16fed0f02b6e4a64360f5d386965e323fe1d081db24259c811a5  deviceinfo
++10c3cb790dcb1c80f2804b1edcb0d9a9985f56fdd942246412f821e142b1d6994564c19a58f4c02df94b436c9f23135387c173af277cb154ae46b22f02211d8c  deviceinfo
+ cb0731b5e71b427024bb47cd70aa48d3be409a89aa476f3fd4dea8e5b42ef87371a65bbe836bca7da04c0384178ad293b44da8a88557ad04fc57857bef502050  kernel-cmdline.conf
+ 03deb65563f4b4421491643854927e88b2d5880b8b19ee6baa4d3fa1ec3f7d7a1c2977fd2c3c41270254efea6fa0c5fdae0a382e7c427d5a3bf6fad34c25375e  initfs-hook.sh
+ "
+diff --git a/device/archived/device-samsung-beyond1lte-downstream/deviceinfo b/device/archived/device-samsung-beyond1lte-downstream/deviceinfo
+index a106ac914b..fa4986e7b7 100644
+--- a/device/archived/device-samsung-beyond1lte-downstream/deviceinfo
++++ b/device/archived/device-samsung-beyond1lte-downstream/deviceinfo
+@@ -38,3 +38,9 @@ deviceinfo_create_initfs_extra="true"
+ # -> "junk in compressed archive" -> panic "Unable to mount root fs". Force gzip.
+ deviceinfo_initfs_compression="gzip"
+ deviceinfo_initfs_extra_compression="gzip"
++
++# Default 18D1:D001 is claimed on Windows by vendor ADB drivers (e.g. vivo oem inf),
++# so the NCM function never gets Windows' UsbNcm driver. Use the Linux Foundation
++# composite-gadget ID so Windows binds usbccgp + UsbNcm.
++deviceinfo_usb_idVendor="0x1D6B"
++deviceinfo_usb_idProduct="0x0104"

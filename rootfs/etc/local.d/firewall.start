@@ -1,0 +1,11 @@
+#!/bin/sh
+# OpenRC local.d: load the S10 firewall with iptables-LEGACY (kernel has no nf_tables).
+# Rules live in /etc/s10-firewall/rules.v4 and rules.v6 (copies in rootfs/etc/s10-firewall/ of this repo).
+# iptables-restore is all-or-nothing: if a rule fails to load, nothing changes,
+# so a bad rule leaves the phone open instead of locking everyone out.
+# Needs the `iptables` package (xtables plug-ins), not just `iptables-legacy`.
+D=/etc/s10-firewall
+command -v iptables-legacy-restore >/dev/null || { echo "firewall: iptables-legacy missing"; exit 0; }
+[ -e /usr/lib/xtables/libxt_standard.so ] || { echo "firewall: xtables plug-ins missing, not loading"; exit 0; }
+iptables-legacy-restore < $D/rules.v4 && echo "firewall: IPv4 rules loaded" || echo "firewall: IPv4 rules FAILED, left unchanged"
+ip6tables-legacy-restore < $D/rules.v6 && echo "firewall: IPv6 rules loaded" || echo "firewall: IPv6 rules FAILED, left unchanged"

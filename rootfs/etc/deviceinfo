@@ -1,0 +1,4 @@
+# Local overrides (appended to the device's deviceinfo values at boot).
+# zram: this kernel has lzo/lz4/deflate but no zstd, so the default algorithm fails.
+deviceinfo_zram_swap_algo="lz4"
+deviceinfo_zram_swap_pct="50"

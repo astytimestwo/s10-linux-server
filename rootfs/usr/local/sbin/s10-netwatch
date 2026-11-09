@@ -1,0 +1,82 @@
+#!/bin/sh
+# /usr/local/sbin/s10-netwatch: run by root's cron every 2 minutes.
+# Normal mode: Wi-Fi may use 5 GHz (faster). If the home router stops answering:
+#    4 min down -> on 5 GHz: fall back to the 2.4 GHz access point (BSSID lock, kept across reboots)
+#                  on 2.4 GHz: reconnect Wi-Fi
+#   10 min down -> turn the Wi-Fi radio off and on (again at 20 min)
+#   30 min down -> reboot (only if up > 20 min and no netwatch reboot in the last 6 h)
+# "s10-netwatch retry5" (root cron, daily 04:00): drop the 2.4 GHz lock and let it try 5 GHz again.
+#   If 5 GHz is still broken, the next checks fall back again within ~4 min.
+# Why: on 2026-11-08 the S10 sat on 5 GHz "connected" but unable to reach the router, twice.
+# The NM band setting doesn't help (the bcmdhd firmware picks the band itself); a BSSID lock does.
+CON=HomeWiFi
+SSID=HomeWiFi
+BSSID24_DEFAULT=AA:BB:CC:DD:EE:01      # router's 2.4 GHz radio (5 GHz is …:02)
+STATE=/run/s10-netwatch.count          # cleared on every boot
+LASTBOOT=/var/lib/s10-netwatch.lastreboot
+LOG=/var/log/s10-netwatch.log
+
+# One run at a time (a hung nmcli must not overlap the next cron run)
+exec 9>/run/s10-netwatch.lock
+if [ "$1" = retry5 ]; then flock -w 120 9 || exit 0; else flock -n 9 || exit 0; fi
+
+log() { echo "$(date '+%F %T') $*" >> $LOG; logger -t s10-netwatch "$*"; }
+freq() { iw dev wlan0 link 2>/dev/null | awk '/freq:/{print int($2); exit}'; }
+
+bssid24() {
+	b=$(nmcli -t -f BSSID,FREQ,SIGNAL,SSID dev wifi list --rescan yes 2>/dev/null |
+		sed 's/\\:/-/g' | awk -F: -v s="$SSID" '$4==s && int($2)<3000 {print $3, $1}' |
+		sort -rn | awk 'NR==1{print $2}' | tr - :)
+	echo "${b:-$BSSID24_DEFAULT}"
+}
+
+if [ "$1" = retry5 ]; then
+	cur=$(nmcli -g 802-11-wireless.bssid con show "$CON" 2>/dev/null)
+	if [ -n "$cur" ]; then
+		log "daily retry: removing 2.4 GHz lock ($cur), reconnecting"
+		nmcli con modify "$CON" 802-11-wireless.bssid "" 802-11-wireless.band ""
+		nmcli con up "$CON" >/dev/null 2>&1
+	fi
+	exit 0
+fi
+
+gw=$(ip route show default 2>/dev/null | awk '{print $3; exit}')
+if [ -n "$gw" ] && { ping -c 2 -W 3 "$gw" >/dev/null 2>&1 || ping -c 2 -W 3 1.1.1.1 >/dev/null 2>&1; }; then
+	[ -s $STATE ] && log "network back (gateway $gw, $(freq) MHz) after $(cat $STATE) failed checks"
+	rm -f $STATE
+	exit 0
+fi
+
+n=$(( $(cat $STATE 2>/dev/null || echo 0) + 1 ))
+echo $n > $STATE
+f=$(freq)
+log "check $n failed (gateway '${gw:-none}', ${f:-no link} MHz)"
+
+if [ $n -ge 2 ] && [ "${f:-0}" -ge 5000 ]; then
+	b=$(bssid24)
+	log "on 5 GHz and unreachable: falling back to 2.4 GHz ($b)"
+	nmcli con modify "$CON" 802-11-wireless.bssid "$b"
+	nmcli con up "$CON" >/dev/null 2>&1
+elif [ $n -eq 2 ]; then
+	log "reconnecting Wi-Fi"
+	nmcli con up "$CON" >/dev/null 2>&1
+fi
+if [ $n -eq 5 ] || [ $n -eq 10 ]; then
+	log "restarting Wi-Fi radio"
+	nmcli radio wifi off; sleep 5; nmcli radio wifi on
+fi
+
+if [ $n -ge 15 ]; then
+	up=$(cut -d. -f1 /proc/uptime)
+	last=$(cat $LASTBOOT 2>/dev/null || echo 0)
+	now=$(date +%s)
+	if [ "$up" -gt 1200 ] && [ $((now - last)) -gt 21600 ]; then
+		log "30 min without network: rebooting"
+		echo "$now" > $LASTBOOT
+		sync
+		reboot
+	fi
+fi
+# Keep the log small
+[ "$(wc -c < $LOG)" -gt 200000 ] && tail -n 500 $LOG > $LOG.tmp && mv $LOG.tmp $LOG
+exit 0
