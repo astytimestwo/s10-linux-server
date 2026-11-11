@@ -1,0 +1,1 @@
+S10 server: SSH key login only (passwords are switched off). Add your public key to /home/user/.ssh/authorized_keys.

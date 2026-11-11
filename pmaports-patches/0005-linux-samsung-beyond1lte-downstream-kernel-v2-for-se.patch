@@ -1,0 +1,259 @@
+From acfe4eec917f7d5b2c0d9754fbae27f2f2b68c5f Mon Sep 17 00:00:00 2001
+From: Augustya Baghel <261733204+astytimestwo@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 07:10:49 +0000
+Subject: [PATCH] linux-samsung-beyond1lte-downstream: kernel v2 for server use
+
+Config:
+- SND_ALOOP=y: ALSA loopback card, so a DSP (CamillaDSP) can sit between
+  players and a USB sound card.
+- LOD_SEC off: Samsung's "Linux on DeX" hardening refuses user namespaces
+  for non-root ("LOD: blocking USERNS from non-root"); off = mainline behaviour.
+- OVERLAY_FS=y, NETFILTER_XT_MATCH_MULTIPORT=y, FHANDLE=y, USB_NET_RNDIS_HOST=y.
+- NF_TABLES stays off on purpose: with unprivileged user namespaces it is a
+  known local-root surface on a 4.14 kernel, and nothing here needs it.
+
+tzdev-idle-waits.patch: the TEE kernel threads (tz_worker_thread x8,
+tz_iwsock, ree_time, scsi_srpmb_worker) slept in TASK_UNINTERRUPTIBLE, which
+counts as load, so an idle phone showed a load average of ~11. They now sleep
+in TASK_IDLE (same semantics, like wait_event_idle() in Linux 4.17+).
+Result on the device: 0 tasks in D state, load average ~0.3 when idle.
+
+Co-Authored-By: Claude Fable 5.2 <noreply@anthropic.com>
+---
+ .../APKBUILD                                  |   6 +-
+ ...nfig-samsung-beyond1lte-downstream.aarch64 |  12 +-
+ .../tzdev-idle-waits.patch                    | 134 ++++++++++++++++++
+ 3 files changed, 144 insertions(+), 8 deletions(-)
+ create mode 100644 device/archived/linux-samsung-beyond1lte-downstream/tzdev-idle-waits.patch
+
+diff --git a/device/archived/linux-samsung-beyond1lte-downstream/APKBUILD b/device/archived/linux-samsung-beyond1lte-downstream/APKBUILD
+index c26ddbb114..743ec76af1 100644
+--- a/device/archived/linux-samsung-beyond1lte-downstream/APKBUILD
++++ b/device/archived/linux-samsung-beyond1lte-downstream/APKBUILD
+@@ -5,7 +5,7 @@
+ maintainer="chiffa <chiffathefoxx@gmail.com>"
+ pkgname=linux-samsung-beyond1lte-downstream
+ pkgver=4.14.316
+-pkgrel=1
++pkgrel=2
+ pkgdesc="Samsung Galaxy S10 downstream kernel fork"
+ arch="aarch64"
+ _carch="arm64"
+@@ -38,6 +38,7 @@ source="
+ 	fix-check-lxdialog.patch
+ 	selinux_include_generated_headers.patch
+ 	loop-configure-apply-block-size.patch
++	tzdev-idle-waits.patch
+ "
+ builddir="$srcdir/$_repository-$_commit"
+ _outdir="out"
+@@ -61,9 +62,10 @@ package() {
+ 
+ sha512sums="
+ 8ac222f644a534204fd5ea5e657991214bfc069042b48620b956ce0c249af6639b9a18c20892481c8514d2cdd3c3bd967062a4d16ba53504fd76d1227a365d44  linux-samsung-beyond1lte-downstream-7d08ec364a0659edcf90a8dae4453b21e4542311.tar.gz
+-a4a99dd42d0f687e5f0a46fc0f7dd61ffa5deb06459153befe109bed87cb282ab3d1454836865b78f7ac8e67225df98a79ff22aa52ce517e82c5ebd6c011f39f  config-samsung-beyond1lte-downstream.aarch64
++e0411b645fc7e4c66392770cb239e45e55b2dd2caf0ad3ced584b7bef54850bf44c75204c4bcca8f834b08c3c1d593b12ca68d314587f3d29bdd97b9efa5ed20  config-samsung-beyond1lte-downstream.aarch64
+ 1872a4d9963f128965ab46b329d448e6b776d373cf99f2b8e11d025aa3e10a0308da19beb715c6bdced0b2c6ef44c47a5c013554a19787a64f8ac58d34bc912f  remove-header-lkc.patch
+ 182be3c596b9cc267ac108d7cf03fc8c328ccc6b36770800e4dcedea8d1bb65e3f5eacf590c2948f58b1418cc60a1670ba77dde8c259e428d158c31b6e1dbaf5  fix-check-lxdialog.patch
+ 6ab9db01d35f7f5cc2c19ebe5f65a7dc479a1c68de587300cdde9a6c759d34610666c72f0f321cd450cf56c13df3b54a774e0f7ebdbf0f8608fbfd66b49d04e7  selinux_include_generated_headers.patch
+ cff9427c3d9eb5088b11424decc93b44357cc7246842902c80dc75fa05ed7ee1f6f5e111b8c65c394fbcc08e7615bac729121b9f72b771d03846bbc2d3dfbf7f  loop-configure-apply-block-size.patch
++6241d4c9b13684356cd12489e58dc2fad8dd91d40a5875a75c9354c8a8e2258f9cf3d5c4f5a5db6d15a7955396c04997e42cc7b77508e99cc1f3542fbf98ca85  tzdev-idle-waits.patch
+ "
+diff --git a/device/archived/linux-samsung-beyond1lte-downstream/config-samsung-beyond1lte-downstream.aarch64 b/device/archived/linux-samsung-beyond1lte-downstream/config-samsung-beyond1lte-downstream.aarch64
+index cf0fa7574d..0cb9016c87 100644
+--- a/device/archived/linux-samsung-beyond1lte-downstream/config-samsung-beyond1lte-downstream.aarch64
++++ b/device/archived/linux-samsung-beyond1lte-downstream/config-samsung-beyond1lte-downstream.aarch64
+@@ -55,7 +55,7 @@ CONFIG_SYSVIPC_SYSCTL=y
+ CONFIG_POSIX_MQUEUE=y
+ CONFIG_POSIX_MQUEUE_SYSCTL=y
+ CONFIG_CROSS_MEMORY_ATTACH=y
+-# CONFIG_FHANDLE is not set
++CONFIG_FHANDLE=y
+ # CONFIG_USELIB is not set
+ CONFIG_AUDIT=y
+ CONFIG_HAVE_ARCH_AUDITSYSCALL=y
+@@ -658,7 +658,7 @@ CONFIG_RANDOMIZE_MODULE_REGION_FULL=y
+ CONFIG_CMDLINE=""
+ # CONFIG_EFI is not set
+ # CONFIG_BUILD_ARM64_APPENDED_DTB_IMAGE is not set
+-CONFIG_LOD_SEC=y
++# CONFIG_LOD_SEC is not set
+ # CONFIG_UH is not set
+ CONFIG_UH_LKMAUTH=y
+ # CONFIG_UH_LKM_BLOCK is not set
+@@ -1013,7 +1013,7 @@ CONFIG_NETFILTER_XT_MATCH_LENGTH=y
+ CONFIG_NETFILTER_XT_MATCH_LIMIT=y
+ CONFIG_NETFILTER_XT_MATCH_MAC=y
+ CONFIG_NETFILTER_XT_MATCH_MARK=y
+-# CONFIG_NETFILTER_XT_MATCH_MULTIPORT is not set
++CONFIG_NETFILTER_XT_MATCH_MULTIPORT=y
+ # CONFIG_NETFILTER_XT_MATCH_NFACCT is not set
+ # CONFIG_NETFILTER_XT_MATCH_OSF is not set
+ CONFIG_NETFILTER_XT_MATCH_OWNER=y
+@@ -2033,7 +2033,7 @@ CONFIG_USB_NET_SMSC95XX=y
+ CONFIG_USB_NET_NET1080=y
+ # CONFIG_USB_NET_PLUSB is not set
+ # CONFIG_USB_NET_MCS7830 is not set
+-# CONFIG_USB_NET_RNDIS_HOST is not set
++CONFIG_USB_NET_RNDIS_HOST=y
+ CONFIG_USB_NET_CDC_SUBSET_ENABLE=y
+ CONFIG_USB_NET_CDC_SUBSET=y
+ # CONFIG_USB_ALI_M5632 is not set
+@@ -3645,7 +3645,7 @@ CONFIG_SND_VERBOSE_PROCFS=y
+ # CONFIG_SND_OPL4_LIB_SEQ is not set
+ CONFIG_SND_DRIVERS=y
+ # CONFIG_SND_DUMMY is not set
+-# CONFIG_SND_ALOOP is not set
++CONFIG_SND_ALOOP=y
+ # CONFIG_SND_MTPAV is not set
+ # CONFIG_SND_SERIAL_U16550 is not set
+ # CONFIG_SND_MPU401 is not set
+@@ -5723,7 +5723,7 @@ CONFIG_QUOTACTL=y
+ CONFIG_FUSE_FS=y
+ # CONFIG_CUSE is not set
+ CONFIG_FUSE_SUPPORT_STLOG=y
+-# CONFIG_OVERLAY_FS is not set
++CONFIG_OVERLAY_FS=y
+ 
+ #
+ # Caches
+diff --git a/device/archived/linux-samsung-beyond1lte-downstream/tzdev-idle-waits.patch b/device/archived/linux-samsung-beyond1lte-downstream/tzdev-idle-waits.patch
+new file mode 100644
+index 0000000000..7ea16b9f81
+--- /dev/null
++++ b/device/archived/linux-samsung-beyond1lte-downstream/tzdev-idle-waits.patch
+@@ -0,0 +1,134 @@
++diff -ruN a/drivers/misc/tzdev/tz_iwsock.c b/drivers/misc/tzdev/tz_iwsock.c
++--- a/drivers/misc/tzdev/tz_iwsock.c	2026-11-11 06:30:02.000242118 +0000
+++++ b/drivers/misc/tzdev/tz_iwsock.c	2026-11-11 06:30:02.076242123 +0000
++@@ -37,9 +37,24 @@
++ #include <linux/sched/signal.h>
++ #endif
++ 
+++/*
+++ * Sleep as TASK_IDLE instead of TASK_UNINTERRUPTIBLE. The TEE kernel threads
+++ * (tz_worker_thread, tz_iwsock, ree_time, scsi_srpmb_worker) wait here forever
+++ * and every uninterruptible sleeper counts as load, which kept the load average
+++ * at ~11 on an idle system. Same semantics as the plain wait_event macro; like the
+++ * wait_event_idle() of Linux 4.17+.
+++ */
+++#define tz_wait_event_idle(wq_head, condition)					\
+++do {										\
+++	might_sleep();								\
+++	if (condition)								\
+++		break;								\
+++	(void)___wait_event(wq_head, condition, TASK_IDLE, 0, 0, schedule());	\
+++} while (0)
+++
++ #if LINUX_VERSION_CODE < KERNEL_VERSION(3, 19, 0)
++ #define tz_iwsock_wait_event(wq, condition)					\
++-	wait_event(wq, condition)
+++	tz_wait_event_idle(wq, condition)
++ 
++ #define tz_iwsock_wait_event_interruptible(wq, condition)			\
++ 	wait_event_interruptible(wq, condition)
++@@ -49,7 +64,7 @@
++ 	DEFINE_WAIT_FUNC(wait, woken_wake_function);				\
++ 	add_wait_queue(&wq, &wait);						\
++ 	while (!(condition))							\
++-		wait_woken(&wait, TASK_UNINTERRUPTIBLE,				\
+++		wait_woken(&wait, TASK_IDLE,				\
++ 			MAX_SCHEDULE_TIMEOUT);					\
++ 	remove_wait_queue(&wq, &wait);						\
++ })
++@@ -397,7 +412,7 @@
++ 	smp_wmb();
++ 
++ 	mutex_lock(&nwd_events_list_lock);
++-	wait_event(tz_iwsock_full_event_buf_wq,
+++	tz_wait_event_idle(tz_iwsock_full_event_buf_wq,
++ 			(ret = tz_iwsock_try_write_swd_event(sid)) != -EAGAIN);
++ 	mutex_unlock(&nwd_events_list_lock);
++ 
++@@ -427,7 +442,7 @@
++ 
++ static void tz_iwsock_notify_internally(int32_t sid)
++ {
++-	wait_event(internal_events_wq,
+++	tz_wait_event_idle(internal_events_wq,
++ 			tz_iwsock_try_write_internal_event(sid) != -EAGAIN);
++ 	wake_up(&tz_iwsock_wq);
++ }
++@@ -748,7 +763,7 @@
++ 	}
++ 
++ 	if (sd->is_kern)
++-		wait_event(sd->wq,
+++		tz_wait_event_idle(sd->wq,
++ 				!tz_iwsock_check_ready() ||
++ 				tz_iwsock_is_connection_done(sd));
++ 	else
++@@ -790,7 +805,7 @@
++ 	int ret = 0;
++ 
++ 	if (sd->is_kern)
++-		wait_event(tz_iwsock_wq, tz_iwsock_check_init_done() != -EAGAIN);
+++		tz_wait_event_idle(tz_iwsock_wq, tz_iwsock_check_init_done() != -EAGAIN);
++ 	else if ((ret = wait_event_interruptible(
++ 				tz_iwsock_wq, tz_iwsock_check_init_done() != -EAGAIN)))
++ 		return ret;
++@@ -849,7 +864,7 @@
++ 
++ 	mutex_lock(&sd->lock);
++ 	if (sd->is_kern)
++-		wait_event(sd->wq, !tz_iwsock_check_ready() ||
+++		tz_wait_event_idle(sd->wq, !tz_iwsock_check_ready() ||
++ 			sd->state != TZ_SK_LISTENING ||
++ 			!circ_buf_is_empty(&sd->read_buf));
++ 	else if ((res = wait_event_interruptible(sd->wq,
++@@ -917,7 +932,7 @@
++ socket_allocation_failed:
++ 	/* Write swd_id to unblock waiting threads in SWd */
++ 	mutex_lock(&sd->lock);
++-	wait_event(sd->wq, tz_iwsock_try_write(&sd->write_buf,
+++	tz_wait_event_idle(sd->wq, tz_iwsock_try_write(&sd->write_buf,
++ 			&conn_req.swd_id, sizeof(conn_req.swd_id)) != -EAGAIN);
++ 	mutex_unlock(&sd->lock);
++ 
++@@ -948,7 +963,7 @@
++ 		while (sd->iwd_buf->swd_state != BUF_SK_CLOSED &&
++ 				circ_buf_read(&sd->read_buf, (char *)&conn_req,
++ 				sizeof(conn_req), CIRC_BUF_MODE_KERNEL) > 0) {
++-			wait_event(sd->wq, tz_iwsock_try_write(&sd->write_buf,
+++			tz_wait_event_idle(sd->wq, tz_iwsock_try_write(&sd->write_buf,
++ 					(char *)&conn_req.swd_id, sizeof(conn_req.swd_id)) != -EAGAIN);
++ 		}
++ 
++@@ -1257,7 +1272,7 @@
++ 	(void)data;
++ 
++ 	while (!kthread_should_stop()) {
++-		wait_event(tz_iwsock_wq,
+++		tz_wait_event_idle(tz_iwsock_wq,
++ 				!circ_buf_is_empty(&swd_sock_events) ||
++ 				!circ_buf_is_empty(&internal_events_out) ||
++ 				kthread_should_stop());
++diff -ruN a/drivers/misc/tzdev/tz_kthread_pool_notifier.c b/drivers/misc/tzdev/tz_kthread_pool_notifier.c
++--- a/drivers/misc/tzdev/tz_kthread_pool_notifier.c	2026-11-11 06:30:02.012242119 +0000
+++++ b/drivers/misc/tzdev/tz_kthread_pool_notifier.c	2026-11-11 06:30:02.076242123 +0000
++@@ -119,7 +119,7 @@
++ 	DEFINE_WAIT_FUNC(wait, tz_kthread_pool_wake_function);
++ 
++ 	for (;;) {
++-		prepare_to_wait(&tz_cmd_waitqueue, &wait, TASK_UNINTERRUPTIBLE);
+++		prepare_to_wait(&tz_cmd_waitqueue, &wait, TASK_IDLE);
++ 		ret = tz_kthread_pool_should_wake(cpu);
++ 		if (ret != KTHREAD_SHOULD_SLEEP)
++ 			break;
++diff -ruN a/drivers/misc/tzdev/tz_kthread_pool_smpboot.c b/drivers/misc/tzdev/tz_kthread_pool_smpboot.c
++--- a/drivers/misc/tzdev/tz_kthread_pool_smpboot.c	2026-11-11 06:30:02.008242119 +0000
+++++ b/drivers/misc/tzdev/tz_kthread_pool_smpboot.c	2026-11-11 06:30:02.076242123 +0000
++@@ -126,7 +126,7 @@
++ 	DEFINE_WAIT_FUNC(wait, tz_kthread_pool_wake_function);
++ 
++ 	for (;;) {
++-		prepare_to_wait(&tz_cmd_waitqueue, &wait, TASK_UNINTERRUPTIBLE);
+++		prepare_to_wait(&tz_cmd_waitqueue, &wait, TASK_IDLE);
++ 		ret = tz_kthread_pool_should_wake(cpu);
++ 		if (ret != KTHREAD_SHOULD_SLEEP)
++ 			break;

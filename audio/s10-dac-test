@@ -1,0 +1,53 @@
+#!/bin/sh
+# s10-dac-test: the OWNER opens a short, supervised window in which "user" can open USB sound
+# cards directly (needs the sudo password). For first tests of a sound card: channels, rates,
+# channel order. THIS BYPASSES THE CROSSOVER: turn the amp down or use headphones first.
+#   sudo s10-dac-test on [minutes]   stop CamillaDSP, give group "loopback" access to USB sound cards
+#                                    (default 30 minutes, then it closes by itself)
+#   sudo s10-dac-test off            close the window now, start CamillaDSP again if it is enabled
+#   sudo s10-dac-test status
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+[ "$(id -u)" = 0 ] || { echo "Run it as: sudo s10-dac-test on|off|status"; exit 64; }
+FLAG=/run/s10-dac-test.until
+
+usb_nodes() {   # device nodes of every USB sound card
+	for c in /proc/asound/card[0-9]*; do
+		[ -e "$c/usbid" ] || continue
+		n=${c#/proc/asound/card}
+		ls /dev/snd/controlC"$n" /dev/snd/pcmC"$n"D* /dev/snd/hwC"$n"D* /dev/snd/midiC"$n"D* 2>/dev/null
+	done
+}
+close_window() {
+	for f in $(usb_nodes); do chgrp audio "$f"; done
+	rm -f "$FLAG"
+	if rc-update show default 2>/dev/null | grep -q "camilladsp"; then rc-service camilladsp start >/dev/null 2>&1; fi
+}
+
+case "$1" in
+	on)
+		mins=${2:-30}
+		case "$mins" in ''|*[!0-9]*) echo "minutes must be a number"; exit 64 ;; esac
+		[ "$mins" -ge 1 ] && [ "$mins" -le 180 ] || { echo "1 to 180 minutes"; exit 64; }
+		nodes=$(usb_nodes)
+		[ -n "$nodes" ] || { echo "No USB sound card is plugged in."; exit 1; }
+		rc-service camilladsp stop >/dev/null 2>&1
+		for f in $nodes; do chgrp loopback "$f"; done
+		until=$(( $(date +%s) + mins * 60 ))
+		echo "$until" > "$FLAG"
+		# closes by itself, even if this terminal goes away
+		start-stop-daemon --start --background --exec /bin/sh -- -c "sleep $((mins * 60)); [ \"\$(cat $FLAG 2>/dev/null)\" = $until ] && /usr/local/sbin/s10-dac-test off"
+		echo "TEST WINDOW OPEN for $mins minutes: 'user' can open these directly, with NO crossover:"
+		grep -l . /proc/asound/card[0-9]*/usbid | sed 's|/usbid||; s|/proc/asound/||' | while read -r c; do echo "  $c: $(cat /proc/asound/$c/id)"; done
+		echo "Amp volume down. Close it with: sudo s10-dac-test off"
+		;;
+	off)
+		close_window
+		echo "Test window closed. USB sound cards are CamillaDSP-only again."
+		;;
+	status)
+		if [ -e "$FLAG" ]; then echo "OPEN until $(date -d "@$(cat $FLAG)" '+%H:%M:%S' 2>/dev/null || cat $FLAG)"; else echo "closed"; fi
+		nodes=$(usb_nodes)
+		if [ -n "$nodes" ]; then ls -l $nodes | awk '{print $4, $NF}'; else echo "no USB sound card plugged in"; fi
+		;;
+	*) echo "usage: sudo s10-dac-test on [minutes] | off | status"; exit 64 ;;
+esac

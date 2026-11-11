@@ -17,4 +17,4 @@ fi
 load=$(cut -d' ' -f1 /proc/loadavg)
 srv=""; mountpoint -q /srv && srv=$(df -P /srv 2>/dev/null | awk 'NR==2{print $5}')
 up=$(awk '{s=int($1); d=int(s/86400); h=int(s%86400/3600); m=int(s%3600/60); if(d) printf "%dd %dh", d, h; else if(h) printf "%dh %dm", h, m; else printf "%dm", m}' /proc/uptime)
-echo "CPU ${cpu}°C  GPU ${gpu}°C  battery ${bat}°C ${pct}% (${st})  |  load ${load} (~11 is normal idle)  |  /srv ${srv:-not mounted}  |  up ${up}"
+echo "CPU ${cpu}°C  GPU ${gpu}°C  battery ${bat}°C ${pct}% (${st})  |  load ${load}  |  /srv ${srv:-not mounted}  |  up ${up}"

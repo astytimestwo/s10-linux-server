@@ -63,8 +63,34 @@ Everything that went wrong between "flash the image" and "runs unattended for da
 
 The Spotify account link works, then every track fails with `error audio key 0 1` and the app sits on "connecting…". Spotify-side change: accounts created after roughly 2024/2025 can't get audio keys through librespot; all versions affected, no workaround ([librespot#1649](https://github.com/librespot-org/librespot/issues/1649)). Not fixable on the phone.
 
+## 12. A load average of 11 on an idle phone
+
+`uptime` said 11.5 while the CPU was 97 % idle, and every agent working on the phone went looking for a runaway process. Eleven kernel threads of Samsung's TrustZone driver sleep uninterruptibly, and Linux counts that as load. Fixed in the kernel: [kernel-v2.md](kernel-v2.md).
+
+## 13. User namespaces refused
+
+`unshare -r` → "Operation not permitted", although `CONFIG_USER_NS=y`. The kernel log explained it: `LOD: blocking USERNS from non-root`. Samsung's "Linux on DeX" hardening (`CONFIG_LOD_SEC`). Switched off in kernel v2.
+
+## 14. The 5 GB system disk filling up
+
+Root is the old Android SYSTEM partition and can't grow; 0.4 GB vanished in one morning. Biggest avoidable users: the apk package cache (348 MB), root's npm cache (299 MB) and a second copy of a 320 MB program held open by running sessions after an update. Fix: caches and npm's global folder moved to `/srv` ([setup.md](setup.md) §2), and a rule for the agents.
+
+## 15. Claude Code broke itself on update
+
+An update installed the new version, npm skipped the package's install script ("blocked because they are not covered by allowScripts"), and the next `claude` said "native binary not installed". Running sessions kept working from the deleted old copy, which hid the problem. Fix: run the install script by hand, then allow it permanently ([services.md](services.md)).
+
+## 16. One project, two paths
+
+A convenience symlink (`~/code` → `/srv/code`) gave every project two addresses. Claude Code keeps memory and history per path, so agents could end up treating one folder as two projects. Fix: the symlink is gone; one path only.
+
+## 17. Giving agents root: three designs
+
+Hand over the sudo password (gives away everything), let a second AI approve each command (built, then dropped before use), or fixed rules. The rules version first looked like a list of forbidden commands; that can't work, because there is always another way to spell "run a shell". It became an allow list with everything else refused: [agents.md](agents.md).
+
 ## Smaller ones
 
 - The first `apk add` of some packages ran the mkinitfs trigger and rewrote `/boot/boot.img`. Harmless here: on this device boot-deploy only writes files in `/boot`; the BOOT partition is only changed by flashing.
 - The kernel and device packages built locally exist only in the phone's apk database (not in any repo), so `apk upgrade` can't replace the patched kernel by accident.
 - Plain `ssh` failed with "Host key verification failed" because the host key was saved in a separate known_hosts file; an `~/.ssh/config` entry fixed it.
+- On this image the SSH server binary is `/usr/sbin/sshd.pam`. Scripts that call `sshd -t` to validate a config before reloading find nothing and, if written carefully, refuse to continue.
+- `wsl.exe -- bash -c '... $VAR ...'` loses shell variables (WSL re-parses the command line). Put the commands in a script file and run that.

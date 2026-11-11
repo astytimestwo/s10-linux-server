@@ -1,0 +1,387 @@
+#!/bin/sh
+# s10-sudo: rule-based root gatekeeper for the Claude agents on the S10. No AI, only fixed rules.
+#
+#   sudo /usr/local/sbin/s10-sudo <command> [args...]    run ONE plain command as root, if the rules allow it
+#   /usr/local/sbin/s10-sudo --check <command> [args...] say what would happen, run nothing (no sudo needed)
+#   /usr/local/sbin/s10-sudo --list                      show what is allowed
+#
+# A sudoers rule lets "user" run exactly this program as root without a password.
+# The command is run directly (no shell), so pipes, redirects and && stay outside, as "user".
+# Anything not on the allowed list is refused. Exit: the command's own code; 77 refused; 64 usage.
+# Log: /var/log/s10-sudo.log
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+IFS=$(printf ' \t\nx'); IFS=${IFS%x}      # space, tab, newline
+unset ENV BASH_ENV CDPATH LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT NODE_OPTIONS
+umask 022
+
+LOG_FILE=/var/log/s10-sudo.log
+BASE_DIR=/etc/s10-sudo
+BASE_SERVICES=$BASE_DIR/baseline-services     # init scripts that existed when the gate was installed
+BASE_PACKAGES=$BASE_DIR/baseline-packages     # packages that were installed then
+# Commands the gate can run. They are only ever taken from the system folders in PATH above,
+# never from /usr/local, /home or /srv.
+ALLOWED=" apk rc-service rc-update rc-status cat head tail wc ls stat du df grep dmesg ps free uptime id lsusb lsmod findmnt netstat blkid ss mount ip iw iptables-legacy ip6tables-legacy sshd.pam tailscale aplay arecord mkdir chown rm install "
+
+list_rules() {
+	cat <<'EOF'
+s10-sudo: what root commands are allowed (everything else is refused; ask the owner)
+
+  One plain command per call:  sudo /usr/local/sbin/s10-sudo <command> [args...]
+  Test without running:        /usr/local/sbin/s10-sudo --check <command> [args...]
+
+Packages
+  apk add <names>              any package from the configured repositories, except ones that
+                               change access or the system base (sudo, doas, openssh, kernel, ...)
+  apk del|upgrade|fix <names>  only packages installed after the gate was set up (not the base system)
+  apk update | info | search | policy | list | version
+
+Services
+  rc-service <name> status                       any service
+  rc-service <name> start|stop|restart|reload    only services installed after the gate was set up
+  rc-update add|del <name> [default]             same; rc-update show, rc-status: always
+
+Looking at the system (read-only)
+  cat head tail wc ls stat du df grep (not recursive)   any path except secrets and raw devices
+  dmesg  ps  free  uptime  id  lsusb  lsmod  findmnt  netstat  blkid  ss  mount (no arguments)
+  ip addr|route|link|neigh|rule show    iw ... link|info|scan dump|station dump (nothing that sets)
+  iptables-legacy -S | -L     ip6tables-legacy -S | -L     sshd.pam -T     aplay -l | -L
+  tailscale status|ip|netcheck|version|ping|whois
+
+Files
+  mkdir -p <path under /srv>
+  chown [-R] user:user <path under /srv>
+  rm [-r] [-f] <path at least two levels under /srv>      e.g. /srv/opt/old-thing
+  install -m 755 <file under /srv or /home/user> /usr/local/bin/<new name>
+
+Never through the gate (owner only): shells and interpreters, editors, reboot or shutdown,
+accounts, groups and passwords, sudo rules, SSH and Tailscale setup, firewall and network changes,
+disks and mounts, kernel modules and sysctl, cron for root, writing files outside /srv,
+downloading as root, and anything that plays sound or touches the sound card.
+EOF
+}
+
+MODE=run
+case "$1" in
+	--list|-l|--help|-h) list_rules; exit 0 ;;
+	--check) MODE=check; shift ;;
+esac
+[ $# -ge 1 ] || { echo 'usage: sudo /usr/local/sbin/s10-sudo [--check] <command> [args...]   (--list shows the rules)' >&2; exit 64; }
+if [ "$MODE" = run ] && [ "$(id -u)" != 0 ]; then
+	echo 'Run it as: sudo /usr/local/sbin/s10-sudo <command> [args...]' >&2
+	exit 64
+fi
+[ $# -le 40 ] || { echo "s10-sudo: too many arguments" >&2; exit 64; }
+for _a in "$@"; do
+	[ ${#_a} -le 1000 ] || { echo "s10-sudo: an argument is longer than 1000 characters" >&2; exit 64; }
+	if printf %s "$_a" | LC_ALL=C grep -q '[[:cntrl:]]' || [ "$(printf %s "$_a" | wc -l)" -ne 0 ]; then
+		echo "s10-sudo: control characters and line breaks are not allowed in arguments" >&2
+		exit 64
+	fi
+done
+
+ID="$(date +%s)-$$"
+CWD=$(pwd -P 2>/dev/null) || CWD=/
+CALLER=$(printf %s "${SUDO_USER:-$(id -un 2>/dev/null)}" | LC_ALL=C tr -cd 'A-Za-z0-9_-' | cut -c1-32)
+case "$TERM" in ''|*[!A-Za-z0-9._-]*) TERM_SAFE=dumb ;; *) TERM_SAFE=$TERM ;; esac
+SHOWN="$*"
+
+log() {
+	[ "$(id -u)" = 0 ] || return 0
+	[ -L "$LOG_FILE" ] && return 0
+	(
+		flock 9
+		printf '%s\t%s\t%s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z')" "$ID" "$1" >&9
+	) 9>>"$LOG_FILE"
+	if [ "$(wc -c < "$LOG_FILE" 2>/dev/null || echo 0)" -gt 1000000 ]; then
+		( flock 9; tail -n 2000 "$LOG_FILE" > "$LOG_FILE.tmp" && cat "$LOG_FILE.tmp" > "$LOG_FILE"; rm -f "$LOG_FILE.tmp" ) 9>>"$LOG_FILE"
+	fi
+}
+deny() {
+	log "REFUSED	mode=$MODE	caller=$CALLER	cwd=$CWD	cmd=$SHOWN	why=$1"
+	echo "s10-sudo: REFUSED: $1" >&2
+	[ "$MODE" = check ] && echo "REFUSED: $1"
+	exit 77
+}
+
+# ---- helpers ---------------------------------------------------------------------------------
+canon() {   # absolute path with symlinks resolved; the tail may not exist yet. Fails on "..".
+	_p=$1
+	case "$_p" in /*) ;; *) _p="$CWD/$_p" ;; esac
+	while :; do case "$_p" in ?*/) _p=${_p%/} ;; *) break ;; esac; done
+	case "$_p/" in */../*) return 1 ;; esac
+	_suf=
+	while [ ! -e "$_p" ] && [ ! -L "$_p" ]; do
+		_suf="/${_p##*/}$_suf"
+		_p=${_p%/*}
+		[ -n "$_p" ] || { _p=/; break; }
+	done
+	_r=$(readlink -f "$_p" 2>/dev/null) || return 1
+	[ -n "$_r" ] || return 1
+	[ "$_r" = / ] && _r=
+	printf '%s%s\n' "$_r" "$_suf"
+}
+secret_path() {
+	case "$1" in
+		/etc/shadow*|/etc/sudoers|/etc/sudoers.d|/etc/sudoers.d/*|/etc/doas*|/etc/ssh/ssh_host_*_key) return 0 ;;
+		/root|/root/*|/var/lib/tailscale|/var/lib/tailscale/*|/var/lib/NetworkManager|/var/lib/NetworkManager/*) return 0 ;;
+		/etc/NetworkManager/system-connections|/etc/NetworkManager/system-connections/*) return 0 ;;
+		/var/lib/samba/private|/var/lib/samba/private/*|/etc/aria2.conf) return 0 ;;
+		/home/*/.ssh|/home/*/.ssh/*|/home/*/.claude/.credentials*|/home/*/.config/gh|/home/*/.config/gh/*) return 0 ;;
+		/proc/kcore|/proc/*/environ|/proc/*/mem|/dev|/dev/*) return 0 ;;
+	esac
+	return 1
+}
+in_baseline() {   # $1 file, $2 name
+	[ -r "$1" ] || return 0          # no baseline file: treat everything as base system (safe side)
+	grep -qxF -- "$2" "$1"
+}
+pkg_name_ok() {
+	case "$1" in ''|*[!A-Za-z0-9._+~\<\>=-]*|*.apk|-*) return 1 ;; esac
+	return 0
+}
+pkg_base() { printf %s "$1" | sed 's/[<>=~].*$//'; }
+
+# ---- rules, one per command --------------------------------------------------------------------
+r_apk() {
+	[ $# -ge 1 ] || deny "apk needs a subcommand"
+	_sub=$1; shift
+	case "$_sub" in
+		update|info|search|policy|list|version) _kind=read ;;
+		add|del|upgrade|fix) _kind=change ;;
+		*) deny "apk $_sub isn't allowed (allowed: add, del, upgrade, fix, update, info, search, policy, list, version)" ;;
+	esac
+	_n=0
+	for _a in "$@"; do
+		case "$_a" in
+			--allow-untrusted|-X|--repository*|--repositories-file*|-p|--root*|--keys-dir*|--arch*|--cache-dir*|--usermode|--initdb|--from*|--force*|-f|--no-scripts|--overlay-from-stdin|--no-chown)
+				deny "apk option $_a isn't allowed" ;;
+		esac
+		case "$_a" in
+			-*)
+				[ "$_kind" = read ] && continue
+				case "$_a" in
+					-U|--update-cache|-s|--simulate|-q|--quiet|-v|--verbose|--no-cache|--no-progress|--no-interactive) continue ;;
+					-r|--rdepends) [ "$_sub" = del ] && continue; deny "apk option $_a is only for del" ;;
+					-l|--latest|-a|--available) [ "$_sub" = upgrade ] && continue; deny "apk option $_a is only for upgrade" ;;
+					*) deny "apk option $_a isn't allowed with $_sub" ;;
+				esac ;;
+		esac
+		[ "$_kind" = read ] && continue
+		pkg_name_ok "$_a" || deny "'$_a' isn't a plain package name (no files, paths or URLs)"
+		_b=$(pkg_base "$_a")
+		_n=$((_n + 1))
+		case "$_b" in
+			sudo|sudo-*|doas*|opendoas*|please*|dropbear*|openssh*|telnet*|tailscale*|networkmanager*|wpa_supplicant*|iptables*|nftables*|ufw*|firewalld*|linux-*|device-*|postmarketos-*|busybox*|musl*|apk-tools*|alpine-keys|alpine-base*|alpine-baselayout*|openrc*|shadow*|linux-pam*)
+				deny "$_b is about access or the system base; apk $_sub on it is the owner's job" ;;
+		esac
+		if [ "$_sub" != add ]; then
+			in_baseline "$BASE_PACKAGES" "$_b" && deny "$_b is part of the base system; apk $_sub is only for packages added later. Ask the owner"
+		fi
+	done
+	[ "$_kind" = read ] || [ $_n -ge 1 ] || deny "apk $_sub needs package names (a full upgrade is the owner's job)"
+}
+svc_ok() {
+	case "$1" in ''|*[!A-Za-z0-9._-]*) deny "bad service name" ;; esac
+	[ -f "/etc/init.d/$1" ] || deny "no such service: $1"
+}
+r_rc_service() {
+	[ $# -eq 2 ] || deny "use: rc-service <name> status|start|stop|restart|reload"
+	svc_ok "$1"
+	case "$2" in
+		status) ;;
+		start|stop|restart|reload)
+			in_baseline "$BASE_SERVICES" "$1" && deny "$1 is a base system service; only status is allowed. Ask the owner" ;;
+		*) deny "rc-service action $2 isn't allowed" ;;
+	esac
+}
+r_rc_update() {
+	case "$1" in
+		''|show|-v) return 0 ;;
+		add|del) ;;
+		*) deny "use: rc-update add|del <name> [default]  or  rc-update show" ;;
+	esac
+	[ $# -eq 2 ] || [ $# -eq 3 ] || deny "use: rc-update add|del <name> [default]"
+	svc_ok "$2"
+	[ $# -eq 2 ] || [ "$3" = default ] || deny "only the default runlevel is allowed"
+	in_baseline "$BASE_SERVICES" "$2" && deny "$2 is a base system service; its boot setup is the owner's job"
+}
+r_read() {
+	for _a in "$@"; do
+		case "$_a" in --files0-from*) deny "option $_a isn't allowed" ;; -*) continue ;; esac
+		_c=$(canon "$_a") || deny "can't resolve path: $_a"
+		secret_path "$_c" && deny "reading $_c isn't allowed (secrets or raw devices)"
+	done
+}
+r_grep() {
+	_seen=0
+	for _a in "$@"; do
+		case "$_a" in
+			--recursive|--dereference-recursive|--file|--file=*|--directories*|--devices*) deny "grep option $_a isn't allowed" ;;
+			--*) continue ;;
+			-*[rRfdD]*) deny "grep option $_a isn't allowed (no recursive search, no pattern files)" ;;
+			-*) continue ;;
+		esac
+		# every plain argument is checked, the pattern too (grep -ex FILE would otherwise slip through)
+		_c=$(canon "$_a") || { [ $_seen -eq 0 ] && { _seen=1; continue; }; deny "can't resolve path: $_a"; }
+		_seen=1
+		secret_path "$_c" && deny "reading $_c isn't allowed (secrets or raw devices)"
+	done
+}
+r_words() {   # $1 = what, $2 = space-separated forbidden words; rest = args
+	_what=$1; _bad=" $2 "; shift 2
+	for _a in "$@"; do
+		case "$_bad" in *" $_a "*) deny "$_what $_a isn't allowed (read-only use only)" ;; esac
+	done
+}
+r_iptables() {
+	_has=0
+	for _a in "$@"; do
+		case "$_a" in
+			--list|--list-rules) _has=1 ;;
+			--line-numbers|--numeric|--verbose|--exact|-t|--table) ;;
+			-*[!SLnvx]*) deny "iptables option $_a isn't allowed (only -S and -L)" ;;
+			-*) case "$_a" in *[SL]*) _has=1 ;; esac ;;
+			*[!A-Za-z0-9_-]*) deny "bad iptables argument" ;;
+		esac
+	done
+	[ $_has -eq 1 ] || deny "only listing rules is allowed: iptables-legacy -S or -L"
+}
+r_mkdir() {
+	_n=0
+	for _a in "$@"; do
+		case "$_a" in -p) continue ;; -*) deny "mkdir option $_a isn't allowed (only -p)" ;; esac
+		_c=$(canon "$_a") || deny "can't resolve path: $_a"
+		case "$_c" in /srv/?*) ;; *) deny "mkdir is limited to /srv (got $_c)" ;; esac
+		_n=$((_n + 1))
+	done
+	[ $_n -ge 1 ] || deny "mkdir needs a path"
+}
+r_chown() {
+	_n=0; _owner=
+	for _a in "$@"; do
+		case "$_a" in -R|-h|-v|-Rh|-hR|-Rv|-vR) continue ;; -*) deny "chown option $_a isn't allowed (only -R)" ;; esac
+		if [ -z "$_owner" ]; then
+			case "$_a" in user|user:user|user:|10000:10000) _owner=$_a; continue ;; *) deny "chown is only allowed to user:user" ;; esac
+		fi
+		_c=$(canon "$_a") || deny "can't resolve path: $_a"
+		case "$_c" in /srv/?*) ;; *) deny "chown is limited to paths under /srv (got $_c)" ;; esac
+		_n=$((_n + 1))
+	done
+	[ $_n -ge 1 ] || deny "use: chown [-R] user:user <path under /srv>"
+}
+r_rm() {
+	_n=0
+	for _a in "$@"; do
+		case "$_a" in -r|-R|-f|-rf|-fr|-Rf|-fR|-v|-rv|-rfv|-vr|-vrf) continue ;; -*) deny "rm option $_a isn't allowed (only -r and -f)" ;; esac
+		while :; do case "$_a" in ?*/) _a=${_a%/} ;; *) break ;; esac; done
+		_base=${_a##*/}; _dir=${_a%/*}
+		[ "$_dir" = "$_a" ] && _dir=.
+		[ -n "$_dir" ] || _dir=/
+		case "$_base" in ''|.|..) deny "bad path for rm" ;; esac
+		_c=$(canon "$_dir") || deny "can't resolve path: $_a"
+		_c="$_c/$_base"
+		case "$_c" in /srv/?*/?*) ;; *) deny "rm is limited to paths at least two levels under /srv (got $_c)" ;; esac
+		_n=$((_n + 1))
+	done
+	[ $_n -ge 1 ] || deny "rm needs a path"
+}
+r_install() {
+	case $# in
+		2) _src=$1; _dst=$2 ;;
+		4) [ "$1" = -m ] && { [ "$2" = 755 ] || [ "$2" = 0755 ]; } || deny "use: install -m 755 <file> /usr/local/bin/<name>"; _src=$3; _dst=$4 ;;
+		*) deny "use: install -m 755 <file> /usr/local/bin/<name>" ;;
+	esac
+	INST_SRC=$(canon "$_src") || deny "can't resolve path: $_src"
+	case "$INST_SRC" in /srv/?*|/home/user/?*) ;; *) deny "the file to install must be under /srv or /home/user" ;; esac
+	[ -f "$INST_SRC" ] || deny "not a regular file: $INST_SRC"
+	_name=${_dst##*/}
+	case "$_name" in ''|*[!A-Za-z0-9._+-]*|.*) deny "bad program name" ;; esac
+	[ "$(canon "${_dst%/*}")" = /usr/local/bin ] || deny "programs can only be installed into /usr/local/bin"
+	case "$_name" in claude|s10-*|camilladsp) deny "$_name is the owner's; it can't be replaced (camilladsp is the one program that may open the sound card)" ;; esac
+	case "$ALLOWED" in *" $_name "*) deny "$_name is a system command name; pick another name" ;; esac
+	for _d in /usr/local/sbin /usr/sbin /usr/bin /sbin /bin; do
+		[ -e "$_d/$_name" ] || [ -L "$_d/$_name" ] && deny "$_name already exists in $_d; pick a name that doesn't shadow a system command"
+	done
+	INST_DST=/usr/local/bin/$_name
+	[ -L "$INST_DST" ] && deny "$INST_DST is a link; ask the owner"
+	return 0
+}
+
+explain() {   # a clear reason for commands that are never allowed
+	case "$1" in
+		sh|ash|bash|dash|zsh|busybox|env|su|sudo|doas|xargs|nohup|setsid|timeout|nice|ionice|chroot|unshare|nsenter|flock|watch|script|strace|gdb|start-stop-daemon|supervise-daemon|openrc-run|run-parts)
+			echo "$1 can run any program as root, so it isn't allowed. Ask the owner" ;;
+		python*|perl|node|npm|npx|lua*|ruby|php|awk|sed|vi|vim|nano|ed|less|more|man|git|make|cargo|pip*|ssh|scp|sftp|rsync|tar|unzip|find|tee|dd|cp|mv|ln|chmod|truncate|touch)
+			echo "$1 can write or run anything as root, so it isn't allowed. Work as user under /srv, or ask the owner" ;;
+		reboot|poweroff|halt|shutdown|init|openrc|rc|kexec)
+			echo "restarting or shutting down the phone is the owner's call" ;;
+		adduser|addgroup|deluser|delgroup|usermod|groupmod|passwd|chpasswd|chsh|gpasswd|visudo|setcap|chattr)
+			echo "accounts, groups, passwords and privileges are the owner's job" ;;
+		nmcli|wpa_cli|ifconfig|route|ifup|ifdown|udhcpc|rfkill|iptables|ip6tables|nft|iptables-legacy-restore|ip6tables-legacy-restore)
+			echo "network and firewall changes can take the phone offline; ask the owner" ;;
+		umount|mkfs*|fdisk|parted|sfdisk|wipefs|losetup|swapon|swapoff|blockdev|e2fsck|resize2fs|tune2fs|fstrim)
+			echo "disks and mounts are the owner's job" ;;
+		modprobe|insmod|rmmod|sysctl)
+			echo "kernel modules and kernel settings are the owner's job" ;;
+		speaker-test|mpv|ffplay|ffmpeg|camilladsp|amixer|alsamixer|alsactl|pactl|pw-play|pw-cli|wpctl)
+			echo "sound must go through the crossover; nothing audio runs as root. Arrange it with the owner" ;;
+		curl|wget) echo "download as user (under /srv), not as root" ;;
+		crontab) echo "use your own crontab as user; root's schedule is the owner's" ;;
+		kill|killall|pkill) echo "stopping other accounts' processes is the owner's job" ;;
+		*) echo "$1 isn't on the allowed list (see: s10-sudo --list). Ask the owner" ;;
+	esac
+}
+
+# ---- decide ----------------------------------------------------------------------------------
+CMD=$1; shift
+NAME=${CMD##*/}
+case "$CMD" in
+	*/*) case "$CMD" in /usr/sbin/"$NAME"|/usr/bin/"$NAME"|/sbin/"$NAME"|/bin/"$NAME") ;; *) deny "programs outside the system folders can't be run as root" ;; esac ;;
+esac
+case "$NAME" in ''|*[!A-Za-z0-9._+-]*) deny "bad command name" ;; esac
+case "$ALLOWED" in *" $NAME "*) ;; *) deny "$(explain "$NAME")" ;; esac
+BIN=
+case "$CMD" in
+	*/*) [ -x "$CMD" ] && BIN=$CMD ;;
+	*) for _d in /usr/sbin /usr/bin /sbin /bin; do [ -x "$_d/$NAME" ] && { BIN=$_d/$NAME; break; }; done ;;
+esac
+[ -n "$BIN" ] || deny "$NAME isn't installed in the system folders"
+
+case "$NAME" in
+	apk)        r_apk "$@" ;;
+	rc-service) r_rc_service "$@" ;;
+	rc-update)  r_rc_update "$@" ;;
+	rc-status|ps|free|uptime|id|lsusb|lsmod|findmnt|netstat) ;;
+	blkid)      for _a in "$@"; do case "$_a" in /dev/*[!A-Za-z0-9/_-]*) deny "bad device name" ;; /dev/?*) ;; *) deny "blkid: only device names are allowed" ;; esac; done ;;
+	cat|head|tail|wc|ls|stat|du|df) r_read "$@" ;;
+	grep)       r_grep "$@" ;;
+	dmesg)      for _a in "$@"; do case "$_a" in -T|-r|-H|-s) ;; *[!0-9]*) deny "dmesg: only -T, -r, -H and -s <size> are allowed" ;; esac; done ;;
+	ss)         for _a in "$@"; do case "$_a" in --kill|--diag*|--filter*) deny "ss option $_a isn't allowed" ;; --*) ;; -*[KDF]*) deny "ss option $_a isn't allowed" ;; esac; done ;;
+	mount)      [ $# -eq 0 ] || deny "mount only without arguments (to list mounts)" ;;
+	ip)         r_words "ip" "add del delete change replace set flush append prepend exec netns monitor restore save import tunnel tuntap xfrm vrf l2tp -batch -b -force" "$@" ;;
+	iw)         r_words "iw" "set del add connect disconnect ibss mesh ap ocb vendor switch roc offchannel cqm wowlan coalesce interface start stop join leave trigger" "$@" ;;
+	iptables-legacy|ip6tables-legacy) r_iptables "$@" ;;
+	sshd.pam)   [ $# -eq 1 ] && { [ "$1" = -T ] || [ "$1" = -t ]; } || deny "only sshd.pam -T (show the active config) is allowed" ;;
+	tailscale)  case "$1" in status|ip|netcheck|version|ping|whois) ;; *) deny "tailscale: only status, ip, netcheck, version, ping, whois" ;; esac ;;
+	aplay|arecord) [ $# -eq 1 ] && { [ "$1" = -l ] || [ "$1" = -L ]; } || deny "only $NAME -l / -L (list devices). Nothing audio is played as root" ;;
+	mkdir)      r_mkdir "$@" ;;
+	chown)      r_chown "$@"; set -- -h "$@" ;;
+	rm)         r_rm "$@" ;;
+	install)    r_install "$@"; set -- -o root -g root -m 755 "$INST_SRC" "$INST_DST" ;;
+	*)          deny "$(explain "$NAME")" ;;
+esac
+
+# ---- allowed ---------------------------------------------------------------------------------
+if [ "$MODE" = check ]; then
+	echo "ALLOWED: $SHOWN"
+	exit 0
+fi
+log "RUN	caller=$CALLER	cwd=$CWD	cmd=$SHOWN"
+cd "$CWD" 2>/dev/null || cd /
+START=$(date +%s)
+env -i PATH="$PATH" HOME=/root USER=root LOGNAME=root TERM="$TERM_SAFE" "$BIN" "$@" </dev/null
+RC=$?
+log "DONE	exit=$RC	seconds=$(( $(date +%s) - START ))"
+exit $RC

@@ -1,0 +1,45 @@
+#!/bin/sh
+# s10-camilla-activate: the OWNER makes a CamillaDSP config the active one (needs the sudo password).
+#   sudo s10-camilla-activate <config.yml>     check it, show its devices, ask, then activate + restart
+#   sudo s10-camilla-activate -y <config.yml>  same without asking
+#   sudo s10-camilla-activate --off            stop and disable the service (config is kept)
+# The active config decides what reaches the speakers, so it is root-owned and only changed here.
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+D=/etc/camilladsp
+[ "$(id -u)" = 0 ] || { echo "Run it as: sudo s10-camilla-activate <config.yml>"; exit 64; }
+
+if [ "$1" = "--off" ]; then
+	rc-service camilladsp stop
+	rc-update del camilladsp default 2>/dev/null
+	echo "CamillaDSP stopped and disabled. Nothing reaches the sound card now."
+	exit 0
+fi
+ASK=1
+[ "$1" = "-y" ] && { ASK=0; shift; }
+SRC=$1
+[ -n "$SRC" ] && [ -f "$SRC" ] || { echo "usage: sudo s10-camilla-activate [-y] <config.yml>   |   --off"; exit 64; }
+
+# Work on a root-owned copy, so the file can't change between the check and the activation.
+install -o root -g root -m 644 "$SRC" "$D/candidate.yml" || exit 1
+if ! su -s /bin/sh camilladsp -c "/usr/local/bin/camilladsp --check $D/candidate.yml"; then
+	rm -f "$D/candidate.yml"
+	echo "The config did not pass 'camilladsp --check'. Nothing changed."
+	exit 1
+fi
+echo
+echo "---- devices in this config ----"
+sed -n '/^devices:/,/^[A-Za-z]/p' "$D/candidate.yml" | sed '$d' | head -40
+echo "--------------------------------"
+if [ $ASK -eq 1 ]; then
+	printf "Make this the active config and restart CamillaDSP? Amp volume down first. [y/N] "
+	read -r ans < /dev/tty
+	case "$ans" in y|Y|yes) ;; *) rm -f "$D/candidate.yml"; echo "Not activated."; exit 1 ;; esac
+fi
+[ -f "$D/active.yml" ] && cp -p "$D/active.yml" "$D/active.yml.prev"
+mv "$D/candidate.yml" "$D/active.yml"
+echo "$(date '+%F %T') activated from $SRC (sha256 $(sha256sum < "$D/active.yml" | cut -c1-16))" >> "$D/activation.log"
+rc-update add camilladsp default 2>/dev/null
+rc-service camilladsp restart
+sleep 3
+rc-service camilladsp status
+tail -n 5 /var/log/camilladsp/camilladsp_rCURRENT.log 2>/dev/null

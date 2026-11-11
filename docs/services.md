@@ -1,6 +1,6 @@
 # Services
 
-Versions as installed in November 2026 (Nura edge = Alpine edge): tailscale 1.104.4, samba 4.23.10, aria2 1.37.0, AdGuard Home 0.107.79, librespot 0.8.0, NetworkManager 1.58.1, OpenRC 0.63.2. Everything comes from the official Alpine repos unless noted.
+Versions as installed in November 2026 (Nura edge = Alpine edge): tailscale 1.104.4, samba 4.23.10, aria2 1.37.0, NetworkManager 1.58.1, OpenRC 0.63.2. (AdGuard Home 0.107.79 and librespot 0.8.0 were installed for a few days and removed again; see below.) Everything comes from the official Alpine repos unless noted.
 
 > Alpine uses **musl**, not glibc. Prebuilt "Linux ARM64" binaries from project websites are usually glibc-linked and won't start. Prefer `apk` packages, or build from source.
 
@@ -49,22 +49,26 @@ doas sh aria2-install.sh                      # scripts/aria2-install.sh
 - `required_dirs=/srv/files`: won't start if the data partition isn't mounted, so it can never fill the root filesystem.
 - 4 connections per server, not 8: some servers answer `429 Too Many Requests` to more.
 
-## AdGuard Home (DNS ad blocking)
+## AdGuard Home (DNS ad blocking): tried, removed
 
-`doas apk add adguardhome adguardhome-openrc`, then the setup wizard on port 3000.
+Installed on day two (`apk add adguardhome adguardhome-openrc`, setup wizard on port 3000), never configured, and removed three days later: a service that runs unconfigured with ports open is worse than no service. If you set it up, two things to know:
 
 - It runs as a non-root user, so it can't bind DNS port 53 until you allow it, for example `doas setcap cap_net_bind_service=+ep /usr/bin/AdGuardHome` (check the binary path with `apk info -L adguardhome`).
-- ⚠ If you point your **router's** DNS at the phone and the phone goes down, every device at home loses DNS ("no internet"). Set a second DNS server in the router as a fallback, or point only some devices at it. Pointing Tailscale's DNS setting at it gives ad blocking on your devices anywhere.
+- ⚠ If you point your **router's** DNS at the phone and the phone goes down, every device at home loses DNS ("no internet"). Set a second DNS server in the router as a fallback, or point only some devices at it.
 
 ## Claude Code and development
 
-- `doas apk add nodejs npm`, then `npm install -g @anthropic-ai/claude-code` (as `user` with an npm prefix in your home, or with doas). Works on Alpine (musl). Recent npm versions may block the package's install script; `--allow-scripts=@anthropic-ai/claude-code` allowed it here.
+- `doas apk add nodejs npm`, then `npm install -g @anthropic-ai/claude-code`. It works on Alpine (musl). npm blocks packages' install scripts by default, and Claude Code needs its script to put the real binary in place, so allow it once and for all: `npm config set allow-scripts=@anthropic-ai/claude-code --location=global`. Without that an update leaves a `claude` that only says "native binary not installed" (fix: run `node install.cjs` in the package folder).
 - `doas apk add github-cli`, then `gh auth login --web` (device-code flow, nothing typed on the phone) and `gh auth setup-git`.
-- Projects live on `/srv` (`~/code → /srv/code`). Typical use: `ssh s10`, `t` (tmux), `claude`, close the laptop, come back later.
+- Projects live in `/srv/code`, under that one path. Typical use: `ssh s10`, `t` (tmux), `claude`, close the laptop, come back later.
+- Agents get root through the rule-based gatekeeper and read a shared notes file: [agents.md](agents.md).
+- Keep npm off the small system disk: [`~/.npmrc`](../rootfs/home/user/.npmrc) sends the cache to `/srv/cache/npm` and global installs to `/srv/npm-global` (on the PATH from [`.bashrc`](../rootfs/home/user/.bashrc)), so `npm install -g` needs no root.
 
-## Audio: USB DAC + CamillaDSP
+## Audio: loopback → CamillaDSP → USB sound card
 
-- A cheap C-Media USB sound card (`0d8c:0102`) shows up as an ALSA card via `snd-usb-audio` (16-bit, 44.1/48 kHz). Samsung's abox USB-offload hooks also attach to it; whether that interferes with playback isn't tested yet. Add your user to the `audio` group.
+Everything is in [`audio/`](../audio/), with its own README. In short:
+
+- A cheap C-Media USB sound card (`0d8c:0102`) shows up as an ALSA card via `snd-usb-audio` (16-bit, 44.1/48 kHz, up to 8 channels). Samsung's abox USB-offload hooks also attach to it; whether that interferes with playback isn't tested yet.
 - **CamillaDSP** isn't packaged for Alpine and the official aarch64 binary is glibc-linked. Built from source in ~4 minutes:
   ```sh
   doas apk add rust cargo alsa-lib-dev
@@ -72,4 +76,6 @@ doas sh aria2-install.sh                      # scripts/aria2-install.sh
   cargo build --release && doas install -m 755 target/release/camilladsp /usr/local/bin/
   ```
   The build runs the CPU at 83 °C (throttling, expected).
-- **librespot (Spotify Connect)**: installed and configured ([`etc/conf.d/librespot`](../rootfs/etc/conf.d/librespot)), and the account link works, but **Spotify refuses to send decryption keys to librespot for accounts created after roughly 2024/2025** (`error audio key 0 1`; upstream issue [librespot#1649](https://github.com/librespot-org/librespot/issues/1649), no workaround). An older account should work. The config sends audio to `/dev/null` until a speaker-safe volume chain is in place.
+- With [kernel v2](kernel-v2.md) there is an ALSA loopback card. Programs play into it, CamillaDSP (an OpenRC service under its own account) reads the other end and is the only thing allowed to open a real sound card. That matters when CamillaDSP is the crossover for the speakers: sound that bypasses it can destroy tweeters.
+- Tested without a sound card: a tone played by a normal user into `hw:Loopback,0,0` came out of CamillaDSP unchanged. Not tested yet: the same with the real USB sound card.
+- **librespot (Spotify Connect): tried, removed.** The account link works, then every track fails: Spotify refuses to send decryption keys to librespot for accounts created after roughly 2024/2025 (`error audio key 0 1`; upstream issue [librespot#1649](https://github.com/librespot-org/librespot/issues/1649), no workaround). An older account should work.

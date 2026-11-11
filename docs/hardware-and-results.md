@@ -20,7 +20,9 @@ Phone: Galaxy S10 SM-G973F (Exynos 9820: 2× M4 2.73 GHz, 2× A75, 4× A55; 8 GB
 | Display | ❌ | panel driver fails (`failed to write seqtbl`); stays black |
 | Built-in speaker/mic | ❌ | Samsung abox audio has no ALSA card (firmware missing) |
 | Cameras, modem/SIM, sensors (sensor hub), NFC, Bluetooth | ❓ | not tested |
-| nf_tables, xt_multiport, overlayfs, CIFS client, zstd initramfs, in-kernel WireGuard | ❌ | not in the kernel config |
+| ALSA loopback, overlayfs, multi-port firewall rules, unprivileged user namespaces | ✅ | since [kernel v2](kernel-v2.md) |
+| nf_tables | ❌ | left off on purpose (a known local-root surface together with user namespaces on 4.14) |
+| CIFS client, zstd initramfs, in-kernel WireGuard, loadable modules | ❌ | not in the kernel config |
 
 ## Measurements
 
@@ -33,6 +35,8 @@ Phone: Galaxy S10 SM-G973F (Exynos 9820: 2× M4 2.73 GHz, 2× A75, 4× A55; 8 GB
 - LAN, phone and PC both on 5 GHz: 19.4 MB/s phone → PC, 13.8 MB/s PC → phone (over SSH). Two Wi-Fi hops share the channel, so ~25–35 MB/s is the realistic ceiling on Wi-Fi; wired USB Ethernet on the phone should get past that (not tested yet).
 - Boot to SSH: 35–47 s.
 
+**Load average:** ~11 on an idle system with the original kernel (eleven TrustZone driver threads counted as load), ~0.3 one minute after boot with kernel v2.
+
 **Power:** roughly 2 W at idle (estimate; not measured with a meter). The battery doubles as a small UPS when the charger is unplugged or the power goes out.
 
-**Reliability (tested so far):** hardware watchdog reboot (63 s), two manual reboot tests (back in 47 s), a live 5 GHz → 2.4 GHz fallback, a real overnight run (~16 h, no errors). The router-outage handling (Wi-Fi retries forever, netwatch reboot after 30 min) was only dry-run with simulated failures. Long-term uptime is still being measured.
+**Reliability (tested so far):** hardware watchdog reboot (63 s), two manual reboot tests (back in 47 s), a live 5 GHz → 2.4 GHz fallback, a kernel swap flashed from the running system (back in 55 s), a real overnight run (~16 h, no errors). The router-outage handling (Wi-Fi retries forever, netwatch reboot after 30 min) was only dry-run with simulated failures. Long-term uptime is still being measured.

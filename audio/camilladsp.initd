@@ -1,0 +1,27 @@
+#!/sbin/openrc-run
+# /etc/init.d/camilladsp (S10): CamillaDSP between the ALSA loopback and the sound card.
+# Runs as the "camilladsp" account, the only one that may open real sound cards.
+# The config is /etc/camilladsp/active.yml, root-owned: the owner activates a config with
+#   sudo /usr/local/sbin/s10-camilla-activate <file>
+# No websocket port on purpose: with one, any local program could push a different config.
+description="CamillaDSP: crossover/DSP between the ALSA loopback and the sound card"
+supervisor=supervise-daemon
+command=/usr/local/bin/camilladsp
+command_args="--logfile /var/log/camilladsp/camilladsp.log --log_rotate_size 1000000 --log_keep_nbr 2 /etc/camilladsp/active.yml"
+command_user="camilladsp:audio"
+# If the sound card is unplugged CamillaDSP exits; try again every 20 s.
+respawn_delay=20
+respawn_max=0
+
+depend() {
+	need localmount
+	after udev-settle
+}
+
+start_pre() {
+	if [ ! -f /etc/camilladsp/active.yml ]; then
+		eerror "No active config. The owner activates one: sudo /usr/local/sbin/s10-camilla-activate <file>"
+		return 1
+	fi
+	checkpath -d -m 750 -o camilladsp:camilladsp /var/log/camilladsp
+}

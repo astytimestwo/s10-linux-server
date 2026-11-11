@@ -1,0 +1,3 @@
+# /etc/sudoers.d/s10-sudo (root:root 0440)
+# "user" may run the gatekeeper as root without a password. Nothing else is passwordless.
+user ALL=(root) NOPASSWD: /usr/local/sbin/s10-sudo

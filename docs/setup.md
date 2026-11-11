@@ -29,15 +29,18 @@ Give it a fixed address (DHCP reservation) in the router so it doesn't move.
 ## 2. Basics
 
 ```sh
-doas apk add iptables iptables-legacy iw tmux htop curl logrotate
+doas apk add iptables iptables-legacy iw tmux htop curl logrotate busybox-suid findmnt iproute2-ss
 doas rc-update add ntpd default; doas rc-update add crond default
 ```
 
+- **`busybox-suid`** is what makes `crontab` and `passwd` work for a normal user; without it both fail with "must be suid to work properly".
 - **zram:** copy [`etc/deviceinfo`](../rootfs/etc/deviceinfo) to `/etc/deviceinfo` (lz4, 50 %). The default zstd isn't in this kernel, so zram silently failed.
 - **Faster boot:** copy [`60-persistent-v4l.rules`](../rootfs/etc/udev/rules.d/60-persistent-v4l.rules) to `/etc/udev/rules.d/`. Without it boot takes ~3 minutes (firmware timeouts, see problems-and-fixes).
 - **Wi-Fi keeps retrying:** `autoconnect-retries=0` in the Wi-Fi profile (already in the example). Otherwise, if the router is down at boot, NetworkManager gives up for good.
 - **NM leaves the USB gadget alone:** [`10-s10-unmanaged.conf`](../rootfs/etc/NetworkManager/conf.d/10-s10-unmanaged.conf) to `/etc/NetworkManager/conf.d/`.
-- **Keys-only SSH:** first confirm you can log in with your key, then copy [`10-keys-only.conf`](../rootfs/etc/ssh/sshd_config.d/10-keys-only.conf) to `/etc/ssh/sshd_config.d/`, check it took effect with `doas sshd -T | grep -i passwordauthentication` (should say `no`; on Alpine the `Include` line comes before any other setting, so the drop-in wins) and `doas rc-service sshd restart`. Keep the SSH session open while you test a second login.
+- **Keys-only SSH:** first confirm you can log in with your key, then copy [`10-keys-only.conf`](../rootfs/etc/ssh/sshd_config.d/10-keys-only.conf) to `/etc/ssh/sshd_config.d/`, check it took effect with `doas sshd.pam -T | grep -i passwordauthentication` (on this image the server binary is `sshd.pam`; plain `sshd` doesn't exist) (should say `no`; on Alpine the `Include` line comes before any other setting, so the drop-in wins) and `doas rc-service sshd restart`. Keep the SSH session open while you test a second login.
+- **A hint for clients without a key:** the same file sets a pre-login banner ([`s10-banner`](../rootfs/etc/ssh/s10-banner) → `/etc/ssh/`), so a password-only client sees why it is refused. Validate with `doas sshd.pam -t` before reloading.
+- **Caches off the system disk:** the root filesystem is 5 GB and can't grow. Move the apk cache (`mkdir -p /srv/cache/apk && mv /var/cache/apk/* /srv/cache/apk/ && ln -s /srv/cache/apk /etc/apk/cache`) and npm's cache and global folder ([`.npmrc`](../rootfs/home/user/.npmrc)) to `/srv`. This freed 0.8 GB here.
 - **Bash as the login shell:** `doas apk add bash shadow && doas chsh -s /bin/bash user`, then copy [`.bashrc`](../rootfs/home/user/.bashrc), [`.bash_profile`](../rootfs/home/user/.bash_profile) and [`.tmux.conf`](../rootfs/home/user/.tmux.conf) to your home folder (`t` = start or re-attach the main tmux session; health line on SSH login; temperatures in the tmux status bar).
 
 ## 3. Phone tuning: charge cap, screen off, watchdog
@@ -79,7 +82,7 @@ The kernel has conntrack but **no nf_tables and no `xt_multiport`**, so: iptable
 > ⚠ The rules load at **every boot** and allow SSH over Wi-Fi only from the subnet written in them (`192.168.1.0/24`). If your home network uses another subnet, you lose SSH over Wi-Fi; only USB and Tailscale stay open, and without those the fix is TWRP (see problem 6 in problems-and-fixes). **Edit the subnet first.**
 
 1. Install the **`iptables`** package, not just `iptables-legacy`. The legacy binaries without the xtables plug-ins load *some* rules and then fail, which locked us out for a night.
-2. Check the rules: [`rules.v4`](../rootfs/etc/s10-firewall/rules.v4) and [`rules.v6`](../rootfs/etc/s10-firewall/rules.v6). Inbound is dropped except loopback, established connections, USB networking and Tailscale (always), ICMP, DHCP renewals, Tailscale's UDP port, and the commented service ports from the home LAN only. Remove ports for services you don't run.
+2. Check the rules: [`rules.v4`](../rootfs/etc/s10-firewall/rules.v4) and [`rules.v6`](../rootfs/etc/s10-firewall/rules.v6). Inbound is dropped except loopback, established connections, USB networking and Tailscale (always), ICMP, DHCP renewals, Tailscale's UDP port, and SSH and Samba from the home LAN only. Add a line per extra service you run.
 3. Test live with a safety net. This undo timer runs detached, so it survives your SSH session dying:
    ```sh
    doas mkdir -p /etc/s10-firewall && doas cp rules.v4 rules.v6 /etc/s10-firewall/
@@ -110,3 +113,9 @@ doas vi /etc/crontabs/root        # add the lines from rootfs/etc/crontabs/root.
 ```
 
 Note: on this image `logger` messages never reach the system log (logbookd), so each script also writes its own log file in `/var/log/`.
+
+## 7. Next steps
+
+- [kernel-v2.md](kernel-v2.md): a second kernel with the audio loopback, user namespaces and a truthful load average.
+- [agents.md](agents.md): letting AI coding agents use root through a rule-based gatekeeper.
+- [`audio/`](../audio/): the audio path and its lock.

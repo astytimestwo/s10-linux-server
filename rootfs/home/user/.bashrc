@@ -1,4 +1,8 @@
 # S10 ~/.bashrc
+# Node tools from "npm install -g" live on the big disk (/srv/npm-global, no root needed).
+# Set before the interactive check below, so scripts and agents get it too.
+case ":$PATH:" in *:/srv/npm-global/bin:*) ;; *) PATH="/srv/npm-global/bin:$PATH" ;; esac
+export PATH
 [ -f /etc/bash/bashrc ] && . /etc/bash/bashrc
 [ -r /usr/share/bash-completion/bash_completion ] && . /usr/share/bash-completion/bash_completion
 case $- in *i*) ;; *) return ;; esac

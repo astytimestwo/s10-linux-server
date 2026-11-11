@@ -1,0 +1,6 @@
+# /etc/udev/rules.d/70-s10-sound.rules (S10): who may open which sound device.
+# Default (50-udev-default.rules): every sound device is root:audio 0660, and only the
+# camilladsp service account is in "audio". So no normal program can reach a real sound card.
+# The ALSA loopback card (the "virtual cable", driver snd_aloop) is opened to group "loopback"
+# (user + camilladsp): programs play INTO it, CamillaDSP reads the other end.
+SUBSYSTEM=="sound", DRIVERS=="snd_aloop", GROUP="loopback", MODE="0660"

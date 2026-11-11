@@ -20,7 +20,7 @@ pmbootstrap init
 #   extra packages, for example: tmux,iptables,iptables-legacy,networkmanager,networkmanager-wifi,iw
 ```
 
-Apply the four patches in [`../pmaports-patches/`](../pmaports-patches/) to the pmaports checkout pmbootstrap uses (`pmbootstrap config aports` prints its path). `git am` needs a git identity (`git config --global user.name/user.email`).
+Apply the patches in [`../pmaports-patches/`](../pmaports-patches/) (0001–0004 make the port boot; 0005 is the optional [kernel v2](kernel-v2.md)) to the pmaports checkout pmbootstrap uses (`pmbootstrap config aports` prints its path). `git am` needs a git identity (`git config --global user.name/user.email`).
 
 ```bash
 cd "$(pmbootstrap config aports)"

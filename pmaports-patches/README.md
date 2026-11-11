@@ -1,6 +1,6 @@
 # pmaports patches
 
-Four commits on top of pmaports `main` (as of 7 Nov 2026, Nura's pmaports), for `device/archived/device-samsung-beyond1lte-downstream` and `device/archived/linux-samsung-beyond1lte-downstream`. Apply with `git am` in pmbootstrap's pmaports checkout.
+Five commits on top of pmaports `main` (as of 7 Nov 2026, Nura's pmaports), for `device/archived/device-samsung-beyond1lte-downstream` and `device/archived/linux-samsung-beyond1lte-downstream`. Apply with `git am` in pmbootstrap's pmaports checkout.
 
 | Patch | What | Why |
 |---|---|---|
@@ -8,5 +8,6 @@ Four commits on top of pmaports `main` (as of 7 Nov 2026, Nura's pmaports), for 
 | 0002 | `deviceinfo_initfs_compression="gzip"` (+ extra) | Kernel has `RD_GZIP`/`RD_LZ4` only; mkinitfs now defaults to zstd → panic "Unable to mount root fs". |
 | 0003 | Kernel: apply `LOOP_CONFIGURE`'s `block_size` (`loop-configure-apply-block-size.patch`) | The Android backport of `loop_configure()` validates but never applies the block size, so the 4096-byte-sector rootfs image showed no partitions and the initramfs couldn't mount root. Matches upstream 5.8+ behaviour. |
 | 0004 | USB gadget ID `1D6B:0104` | The default `18D1:D001` gets grabbed on Windows by vendor ADB drivers, so the network function never loads. |
+| 0005 | Kernel v2 (package release r2): `SND_ALOOP`, `OVERLAY_FS`, `NETFILTER_XT_MATCH_MULTIPORT`, `FHANDLE`, `USB_NET_RNDIS_HOST` on, `LOD_SEC` off; `tzdev-idle-waits.patch` | What a server needed after a few days of use: an audio loopback, user namespaces for normal users, and an idle load average near 0 where it was 11. Details: [docs/kernel-v2.md](../docs/kernel-v2.md). 0001–0004 are needed to boot at all; 0005 is optional. |
 
-The kernel patch (inside 0003) is a change to the Linux kernel and is GPL-2.0-only like the kernel. The pmaports packaging changes follow pmaports' license.
+The kernel patches (inside 0003 and 0005) are changes to the Linux kernel and are GPL-2.0-only like the kernel. The pmaports packaging changes follow pmaports' license.

@@ -2,20 +2,20 @@
 
 An old Samsung Galaxy S10 (Exynos 9820, 8 GB RAM) running real Linux instead of Android, as a silent, always-on home server that draws roughly 2 W (estimate). No screen, no Android: the phone boots [Nura](https://nura.eco) (the renamed postmarketOS, with Alpine Linux underneath) on a patched downstream 4.14 kernel, and everything is reached over SSH and the network.
 
-This repo has everything that was needed to get there: the kernel and device-package patches that made an abandoned port boot again, the configs and scripts running on the phone, and notes on every problem hit along the way and how it was fixed.
+This repo has everything that was needed to get there: the kernel and device-package patches that made an abandoned port boot again, a second kernel round that fixed what a server needs, the configs and scripts running on the phone, a rule-based way to let AI coding agents use root safely, and notes on every problem hit along the way.
 
-> **Status:** set up on 7–8 Nov 2026 and running since. Tested so far: recovery from reboots (watchdog-triggered and manual), a simulated 5 GHz Wi-Fi failure (automatic fallback to 2.4 GHz), and a quiet night of ~16 h idling at ~33 °C. Longer-term reliability is still being measured.
+> **Status (11 Nov 2026):** set up on 7–8 Nov 2026 and running since. Tested so far: recovery from reboots (watchdog-triggered and manual), a simulated 5 GHz Wi-Fi failure (automatic fallback to 2.4 GHz), a kernel swap flashed from the running system, and several quiet nights at ~33 °C. Longer-term reliability is still being measured.
 
 ## What it does
 
 | Job | How |
 |---|---|
-| Remote shell + coding agent | SSH (keys only) + tmux; Claude Code runs on the phone and keeps working with the laptop closed |
+| Remote shell + coding agents | SSH (keys only) + tmux; Claude Code runs on the phone and keeps working with the laptop closed |
+| Root for the agents, safely | [`gatekeeper/`](gatekeeper/): a rule-based `s10-sudo` that runs a fixed list of safe root commands without a password and refuses the rest |
 | Reach it from anywhere | Tailscale (direct connection, no port forwarding) |
 | File server | Samba share for Windows Explorer, on a 107 GB ext4 partition (old Android userdata) |
 | Download station | aria2 + AriaNg web UI: paste a link from any device, the phone finishes it |
-| Ad blocking | AdGuard Home (installed, not configured yet) |
-| Audio | USB DAC detected (ALSA), CamillaDSP 4.1.3 built from source for musl |
+| Audio | [`audio/`](audio/): ALSA loopback → CamillaDSP → USB sound card, locked so nothing can bypass the DSP (crossover) |
 | Looking after itself | firewall, hardware watchdog, Wi-Fi watchdog with 5 GHz → 2.4 GHz fallback, temperature logger, vibration signals at boot |
 
 ## Hardware status on this kernel
@@ -23,11 +23,12 @@ This repo has everything that was needed to get there: the kernel and device-pac
 | Works | Doesn't work | Untested |
 |---|---|---|
 | Wi-Fi 2.4 + 5 GHz (bcmdhd) | Display (panel driver fails, screen stays black) | USB Ethernet adapters (drivers are in the kernel) |
-| USB host: DAC, storage | Built-in speaker/mic (no ALSA card) | Cameras, modem/SIM, sensors, NFC, Bluetooth |
+| USB host: sound card, storage | Built-in speaker/mic (no usable ALSA card) | Cameras, modem/SIM, sensors, NFC, Bluetooth |
 | Charging with an 80 % cap | USB networking to **Windows** (works from Linux/WSL) | Fast charging |
-| Hardware watchdog | nf_tables, iptables multiport (not in the kernel config) | |
-| Vibration motor, rear flash LED | | |
+| Hardware watchdog | nf_tables (left off on purpose, see [kernel v2](docs/kernel-v2.md)) | Sound through a real USB sound card with the DSP in the path |
+| Vibration motor, rear flash LED | Loadable kernel modules (everything is built in) | |
 | Thermal throttling (holds 83 °C under full load) | | |
+| Since kernel v2: ALSA loopback, overlayfs, unprivileged user namespaces, multi-port firewall rules, a truthful load average | | |
 
 Details and numbers: [docs/hardware-and-results.md](docs/hardware-and-results.md).
 
@@ -41,19 +42,24 @@ A lithium battery on a charger 24/7 deserves some care:
 ## Repo layout
 
 ```
-pmaports-patches/   4 patches on top of pmaports (kernel + device package); the port doesn't boot without them
+pmaports-patches/   5 patches on top of pmaports: 4 to make the port boot, 1 for kernel v2
 rootfs/             files as they sit on the phone (etc/, usr/local/, home/user/)
-scripts/            helpers: partition backup, aria2 install, SSH over USB via WSL
-docs/               build + flash, setup, services, problems and fixes, hardware + results
+gatekeeper/         s10-sudo: rule-based root access for agents, with its test suite
+audio/              the audio path and its lock (device rule, CamillaDSP service, owner tools)
+agents/             the notes file every AI agent on the phone reads (CLAUDE.md)
+scripts/            helpers: partition backup, aria2 install, SSH over USB via WSL, boot image repack
+docs/               build + flash, kernel v2, setup, services, agents, problems and fixes, results
 ```
 
 ## Read next
 
 1. [docs/build-and-flash.md](docs/build-and-flash.md): building the image with pmbootstrap and flashing it with Odin + TWRP
 2. [docs/setup.md](docs/setup.md): first boot without a screen, Wi-Fi, storage, firewall, watchdog
-3. [docs/services.md](docs/services.md): Tailscale, Samba, aria2, AdGuard, Claude Code, audio
-4. [docs/problems-and-fixes.md](docs/problems-and-fixes.md): bootloops, a firewall lockout, a 3-minute boot, "connected but unreachable" Wi-Fi, Spotify blocking librespot
-5. [docs/hardware-and-results.md](docs/hardware-and-results.md): what works, thermals, storage and network speed
+3. [docs/kernel-v2.md](docs/kernel-v2.md): the second kernel: loopback, user namespaces, a load average of 11 explained and fixed, and swapping a kernel from the running system
+4. [docs/services.md](docs/services.md): Tailscale, Samba, aria2, Claude Code, audio
+5. [docs/agents.md](docs/agents.md): running AI coding agents on it: root through a gatekeeper, a shared notes file, what went wrong first
+6. [docs/problems-and-fixes.md](docs/problems-and-fixes.md): bootloops, a firewall lockout, a 3-minute boot, "connected but unreachable" Wi-Fi, Spotify blocking librespot, and more
+7. [docs/hardware-and-results.md](docs/hardware-and-results.md): what works, thermals, storage and network speed
 
 ## Is this for you?
 
@@ -68,15 +74,17 @@ You need a **Galaxy S10 (SM-G973F, Exynos)**, a **Windows PC** (the flashing gui
 - **TWRP**: a custom recovery (a tiny Linux with a touchscreen UI) used for backups and writing partitions.
 - **vbmeta**: Android Verified Boot data; flashing a "verification disabled" one lets the phone boot a custom kernel.
 - **Knox**: Samsung's security flag; unlocking trips it permanently (Samsung Pay etc. stop working forever).
-- **OpenRC**: the init system (starts services). **doas**: a smaller `sudo`. **musl**: Alpine's C library (glibc binaries don't run).
+- **OpenRC**: the init system (starts services). **doas / sudo**: run a command as root. **musl**: Alpine's C library (glibc binaries don't run).
 - **BSSID**: the hardware address of one Wi-Fi access point/band. **pstore**: kernel logs kept in RAM across a reboot.
+- **ALSA loopback**: a virtual sound card; what is played into one side can be recorded from the other ("virtual cable").
+- **TEE / TrustZone**: the processor's "secure world"; Samsung's driver for it is `tzdev`.
 
 ## Credits
 
 - [postmarketOS / Nura](https://nura.eco) and the original `samsung-beyond1lte-downstream` port maintainers
 - LineageOS for the Exynos 9820 kernel the port is based on
-- TWRP, Tailscale, aria2 + AriaNg, CamillaDSP, Samba, AdGuard Home
+- TWRP, Tailscale, aria2 + AriaNg, CamillaDSP, Samba
 
 ## License
 
-MIT for everything written here (see [LICENSE](LICENSE)). The files in `pmaports-patches/` modify pmaports and the Linux kernel and fall under those projects' licenses (the kernel patch is GPL-2.0).
+MIT for everything written here (see [LICENSE](LICENSE)). The files in `pmaports-patches/` modify pmaports and the Linux kernel and fall under those projects' licenses (the kernel patches are GPL-2.0).
